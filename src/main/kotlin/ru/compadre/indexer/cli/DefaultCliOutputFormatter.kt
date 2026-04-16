@@ -2,6 +2,7 @@ package ru.compadre.indexer.cli
 
 import ru.compadre.indexer.workflow.result.ChunkEmbeddingPreview
 import ru.compadre.indexer.workflow.result.ChunkPreviewResult
+import ru.compadre.indexer.workflow.result.CompareReportResult
 import ru.compadre.indexer.workflow.result.CommandResult
 import ru.compadre.indexer.workflow.result.DocumentLoadResult
 import ru.compadre.indexer.workflow.result.HelpResult
@@ -14,6 +15,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
     override fun format(result: CommandResult): String = when (result) {
         is HelpResult -> helpText(result)
         is IndexPersistResult -> indexPersistText(result)
+        is CompareReportResult -> compareReportText(result)
         is ChunkPreviewResult -> chunkPreviewText(result)
         is DocumentLoadResult -> documentLoadText(result)
     }
@@ -35,7 +37,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  chunking.fixedSize = ${result.fixedSize}")
         add("  chunking.overlap = ${result.overlap}")
         add("")
-        add("Текущий статус: index сохраняет SQLite-индекс, compare показывает preview chunking и embeddings.")
+        add("Текущий статус: index сохраняет SQLite-индекс, compare строит comparison.md и показывает метрики стратегий.")
     }.joinToString(separator = System.lineSeparator())
 
     private fun indexPersistText(result: IndexPersistResult): String = buildList {
@@ -61,6 +63,39 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
             add("Пропущенные чанки:")
             result.skippedChunkIds.take(10).forEach { chunkId ->
                 add("  - $chunkId")
+            }
+        }
+    }.joinToString(separator = System.lineSeparator())
+
+    private fun compareReportText(result: CompareReportResult): String = buildList {
+        add("Команда `compare` завершила сравнение стратегий chunking.")
+        add("")
+        add("Параметры запуска:")
+        add("  inputDir = ${result.inputDir}")
+        add("  outputDir = ${result.outputDir}")
+        add("  report = ${result.reportPath}")
+        add("")
+        add("Сводка:")
+        add("  documents = ${result.report.documentsCount}")
+        add("  fixed.chunks = ${result.report.fixedMetrics.chunksCount}")
+        add("  fixed.avgLength = ${result.report.fixedMetrics.averageLength.toInt()}")
+        add("  structured.chunks = ${result.report.structuredMetrics.chunksCount}")
+        add("  structured.avgLength = ${result.report.structuredMetrics.averageLength.toInt()}")
+        add("")
+        add("Распределение fixed:")
+        if (result.report.fixedMetrics.lengthBuckets.isEmpty()) {
+            add("  - empty")
+        } else {
+            result.report.fixedMetrics.lengthBuckets.forEach { bucket ->
+                add("  - ${bucket.rangeLabel}: ${bucket.count}")
+            }
+        }
+        add("Распределение structured:")
+        if (result.report.structuredMetrics.lengthBuckets.isEmpty()) {
+            add("  - empty")
+        } else {
+            result.report.structuredMetrics.lengthBuckets.forEach { bucket ->
+                add("  - ${bucket.rangeLabel}: ${bucket.count}")
             }
         }
     }.joinToString(separator = System.lineSeparator())

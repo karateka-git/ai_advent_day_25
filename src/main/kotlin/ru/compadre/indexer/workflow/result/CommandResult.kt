@@ -2,6 +2,7 @@ package ru.compadre.indexer.workflow.result
 
 import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.model.RawDocument
+import ru.compadre.indexer.report.ChunkingComparisonReport
 
 /**
  * Базовый тип результатов выполнения CLI-команд.
@@ -45,6 +46,16 @@ data class IndexPersistResult(
     val embeddingsStored: Int,
     val skippedChunkIds: List<String>,
     val strategiesStored: List<String>,
+) : CommandResult
+
+/**
+ * Результат сравнения fixed и structured chunking с сохранённым отчётом.
+ */
+data class CompareReportResult(
+    val inputDir: String,
+    val outputDir: String,
+    val reportPath: String,
+    val report: ChunkingComparisonReport,
 ) : CommandResult
 
 /**

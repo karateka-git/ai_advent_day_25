@@ -9,6 +9,8 @@ import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.model.EmbeddedChunk
 import ru.compadre.indexer.model.RawDocument
+import ru.compadre.indexer.report.ChunkingComparisonService
+import ru.compadre.indexer.report.MarkdownComparisonReportWriter
 import ru.compadre.indexer.storage.IndexStore
 import ru.compadre.indexer.storage.SqliteIndexStore
 import ru.compadre.indexer.workflow.command.CompareCommand
@@ -17,6 +19,7 @@ import ru.compadre.indexer.workflow.command.IndexCommand
 import ru.compadre.indexer.workflow.command.WorkflowCommand
 import ru.compadre.indexer.workflow.result.ChunkEmbeddingPreview
 import ru.compadre.indexer.workflow.result.ChunkPreviewResult
+import ru.compadre.indexer.workflow.result.CompareReportResult
 import ru.compadre.indexer.workflow.result.CommandResult
 import ru.compadre.indexer.workflow.result.HelpResult
 import ru.compadre.indexer.workflow.result.IndexPersistResult
@@ -28,6 +31,8 @@ import java.nio.file.Path
 class DefaultWorkflowCommandHandler(
     private val documentLoader: DocumentLoader = DocumentLoader(),
     private val indexStore: IndexStore = SqliteIndexStore(),
+    private val comparisonService: ChunkingComparisonService = ChunkingComparisonService(),
+    private val comparisonReportWriter: MarkdownComparisonReportWriter = MarkdownComparisonReportWriter(),
 ) : WorkflowCommandHandler {
     override suspend fun handle(command: WorkflowCommand, config: AppConfig): CommandResult = when (command) {
         HelpCommand -> HelpResult(
@@ -46,13 +51,9 @@ class DefaultWorkflowCommandHandler(
             allStrategies = command.allStrategies,
         )
 
-        is CompareCommand -> buildChunkPreviewResult(
-            commandName = "compare",
+        is CompareCommand -> buildCompareReport(
             inputDir = command.inputDir ?: config.app.inputDir,
             config = config,
-            strategy = null,
-            allStrategies = true,
-            strategyLabel = "fixed vs structured",
         )
     }
 
@@ -96,31 +97,37 @@ class DefaultWorkflowCommandHandler(
         )
     }
 
-    private suspend fun buildChunkPreviewResult(
-        commandName: String,
+    private fun buildCompareReport(
         inputDir: String,
         config: AppConfig,
-        strategy: ChunkingStrategy?,
-        allStrategies: Boolean,
-        strategyLabel: String,
-    ): ChunkPreviewResult {
+    ): CompareReportResult {
         val documents = documentLoader.load(Path.of(inputDir))
-        val chunks = buildChunks(
+        val fixedChunks = buildChunks(
             documents = documents,
             config = config,
-            strategy = strategy,
-            allStrategies = allStrategies,
+            strategy = ChunkingStrategy.FIXED,
+            allStrategies = false,
         )
-        val embeddings = buildEmbeddingPreview(chunks, config)
+        val structuredChunks = buildChunks(
+            documents = documents,
+            config = config,
+            strategy = ChunkingStrategy.STRUCTURED,
+            allStrategies = false,
+        )
+        val report = comparisonService.buildReport(
+            inputDir = inputDir,
+            documentsCount = documents.size,
+            fixedChunks = fixedChunks,
+            structuredChunks = structuredChunks,
+        )
+        val reportPath = Path.of(config.app.outputDir).resolve("comparison.md")
+        comparisonReportWriter.write(reportPath, report)
 
-        return ChunkPreviewResult(
-            commandName = commandName,
+        return CompareReportResult(
             inputDir = inputDir,
             outputDir = config.app.outputDir,
-            strategyLabel = strategyLabel,
-            documents = documents,
-            chunks = chunks,
-            embeddings = embeddings,
+            reportPath = reportPath.toAbsolutePath().toString(),
+            report = report,
         )
     }
 
