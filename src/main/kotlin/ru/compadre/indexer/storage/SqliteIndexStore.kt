@@ -2,8 +2,15 @@ package ru.compadre.indexer.storage
 
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
+import ru.compadre.indexer.embedding.model.ChunkEmbedding
+import ru.compadre.indexer.model.ChunkMetadata
+import ru.compadre.indexer.model.ChunkingStrategy
+import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.model.EmbeddedChunk
 import ru.compadre.indexer.model.RawDocument
+import ru.compadre.indexer.model.SourceType
 import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
@@ -33,6 +40,19 @@ class SqliteIndexStore : IndexStore {
             connection.commit()
 
             return readSummary(connection)
+        }
+    }
+
+    override fun readEmbeddedChunks(
+        databasePath: Path,
+        strategy: ChunkingStrategy?,
+    ): List<EmbeddedChunk> {
+        if (!Files.exists(databasePath)) {
+            return emptyList()
+        }
+
+        DriverManager.getConnection("jdbc:sqlite:${databasePath.toAbsolutePath()}").use { connection ->
+            return readEmbeddedChunks(connection, strategy)
         }
     }
 
@@ -168,6 +188,71 @@ class SqliteIndexStore : IndexStore {
         }
     }
 
+    private fun readEmbeddedChunks(
+        connection: Connection,
+        strategy: ChunkingStrategy?,
+    ): List<EmbeddedChunk> {
+        val embeddedChunks = mutableListOf<EmbeddedChunk>()
+        val sql = buildString {
+            append(
+                """
+                SELECT
+                    c.chunk_id,
+                    c.document_id,
+                    c.strategy,
+                    c.source_type,
+                    c.file_path,
+                    c.title,
+                    c.section,
+                    c.text,
+                    c.start_offset,
+                    c.end_offset,
+                    e.model,
+                    e.vector_json
+                FROM chunks c
+                INNER JOIN embeddings e ON e.chunk_id = c.chunk_id
+                """.trimIndent(),
+            )
+            if (strategy != null) {
+                append(" WHERE c.strategy = ?")
+            }
+            append(" ORDER BY c.file_path, c.start_offset")
+        }
+
+        connection.prepareStatement(sql).use { statement ->
+            if (strategy != null) {
+                statement.setString(1, strategy.name)
+            }
+
+            statement.executeQuery().use { resultSet ->
+                while (resultSet.next()) {
+                    embeddedChunks += EmbeddedChunk(
+                        chunk = DocumentChunk(
+                            metadata = ChunkMetadata(
+                                chunkId = resultSet.getString("chunk_id"),
+                                documentId = resultSet.getString("document_id"),
+                                sourceType = SourceType.valueOf(resultSet.getString("source_type")),
+                                filePath = resultSet.getString("file_path"),
+                                title = resultSet.getString("title"),
+                                section = resultSet.getString("section"),
+                                startOffset = resultSet.getInt("start_offset"),
+                                endOffset = resultSet.getInt("end_offset"),
+                            ),
+                            strategy = ChunkingStrategy.valueOf(resultSet.getString("strategy")),
+                            text = resultSet.getString("text"),
+                        ),
+                        embedding = ChunkEmbedding(
+                            model = resultSet.getString("model"),
+                            vector = decodeVector(resultSet.getString("vector_json")),
+                        ),
+                    )
+                }
+            }
+        }
+
+        return embeddedChunks
+    }
+
     private fun readSummary(connection: Connection): StoredIndexSummary {
         val documentsCount = queryCount(connection, "SELECT COUNT(*) FROM documents")
         val chunksCount = queryCount(connection, "SELECT COUNT(*) FROM chunks")
@@ -207,5 +292,10 @@ class SqliteIndexStore : IndexStore {
         private val json = Json {
             prettyPrint = false
         }
+
+        private fun decodeVector(vectorJson: String): List<Float> =
+            json.parseToJsonElement(vectorJson)
+                .jsonArray
+                .map { it.jsonPrimitive.content.toFloat() }
     }
 }
