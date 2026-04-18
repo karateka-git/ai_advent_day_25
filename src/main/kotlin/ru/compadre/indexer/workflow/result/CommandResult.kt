@@ -66,6 +66,10 @@ data class AskResult(
     val query: String,
     val mode: String,
     val answer: String,
+    val strategyLabel: String? = null,
+    val topK: Int? = null,
+    val databasePath: String? = null,
+    val matches: List<SearchMatch> = emptyList(),
 ) : CommandResult
 
 /**

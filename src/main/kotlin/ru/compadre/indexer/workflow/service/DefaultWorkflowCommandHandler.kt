@@ -12,6 +12,7 @@ import ru.compadre.indexer.model.RawDocument
 import ru.compadre.indexer.report.ChunkingComparisonService
 import ru.compadre.indexer.report.MarkdownComparisonReportWriter
 import ru.compadre.indexer.qa.PlainQuestionAnsweringService
+import ru.compadre.indexer.qa.RagQuestionAnsweringService
 import ru.compadre.indexer.search.BruteForceSearchEngine
 import ru.compadre.indexer.storage.IndexStore
 import ru.compadre.indexer.storage.SqliteIndexStore
@@ -41,6 +42,7 @@ class DefaultWorkflowCommandHandler(
     private val comparisonReportWriter: MarkdownComparisonReportWriter = MarkdownComparisonReportWriter(),
     private val plainQuestionAnsweringService: PlainQuestionAnsweringService = PlainQuestionAnsweringService(),
     private val searchEngine: BruteForceSearchEngine = BruteForceSearchEngine(),
+    private val ragQuestionAnsweringService: RagQuestionAnsweringService = RagQuestionAnsweringService(searchEngine),
 ) : WorkflowCommandHandler {
     override suspend fun handle(command: WorkflowCommand, config: AppConfig): CommandResult = when (command) {
         HelpCommand -> HelpResult(
@@ -52,14 +54,7 @@ class DefaultWorkflowCommandHandler(
             overlap = config.chunking.overlap,
         )
 
-        is AskCommand -> AskResult(
-            query = command.query,
-            mode = command.mode,
-            answer = plainQuestionAnsweringService.answer(
-                question = command.query,
-                config = config.llm,
-            ),
-        )
+        is AskCommand -> runAsk(command, config)
 
         is SearchCommand -> runSearch(
             query = command.query,
@@ -229,6 +224,52 @@ class DefaultWorkflowCommandHandler(
             embeddingService.close()
         }
     }
+
+    private suspend fun runAsk(
+        command: AskCommand,
+        config: AppConfig,
+    ): AskResult =
+        when (command.mode.lowercase()) {
+            "plain" -> AskResult(
+                query = command.query,
+                mode = "plain",
+                answer = plainQuestionAnsweringService.answer(
+                    question = command.query,
+                    config = config.llm,
+                ),
+            )
+
+            "rag" -> {
+                val strategy = command.strategy ?: ChunkingStrategy.FIXED
+                val topK = command.topK ?: config.search.topK
+                val databasePath = resolveDatabasePath(
+                    outputDir = config.app.outputDir,
+                    strategy = strategy,
+                    allStrategies = false,
+                )
+                val ragAnswer = ragQuestionAnsweringService.answer(
+                    question = command.query,
+                    databasePath = databasePath,
+                    strategy = strategy,
+                    topK = topK,
+                    config = config,
+                )
+
+                AskResult(
+                    query = command.query,
+                    mode = "rag",
+                    answer = ragAnswer.answer,
+                    strategyLabel = strategy.id,
+                    topK = topK,
+                    databasePath = databasePath.toAbsolutePath().toString(),
+                    matches = ragAnswer.matches,
+                )
+            }
+
+            else -> throw IllegalArgumentException(
+                "Для `ask --mode` поддерживаются только значения `plain` и `rag`.",
+            )
+        }
 
     private suspend fun runSearch(
         query: String,
