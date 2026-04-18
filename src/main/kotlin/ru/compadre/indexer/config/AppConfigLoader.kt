@@ -1,13 +1,16 @@
 package ru.compadre.indexer.config
 
 import com.typesafe.config.ConfigFactory
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
- * Загружает настройки приложения из `application.conf`.
+ * Загружает настройки приложения из `application.conf`
+ * и, при наличии, накладывает локальный `config/app_secrets.conf`.
  */
 object AppConfigLoader {
     fun load(): AppConfig {
-        val config = ConfigFactory.load()
+        val config = loadMergedConfig()
 
         return AppConfig(
             app = AppSection(
@@ -27,5 +30,16 @@ object AppConfigLoader {
             ),
         )
     }
+
+    private fun loadMergedConfig() =
+        if (Files.exists(SECRET_CONFIG_PATH)) {
+            ConfigFactory.parseFile(SECRET_CONFIG_PATH.toFile())
+                .withFallback(ConfigFactory.load())
+                .resolve()
+        } else {
+            ConfigFactory.load()
+        }
+
+    private val SECRET_CONFIG_PATH: Path = Path.of("config", "app_secrets.conf")
 }
 
