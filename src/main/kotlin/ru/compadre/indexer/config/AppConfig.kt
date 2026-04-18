@@ -6,6 +6,7 @@ package ru.compadre.indexer.config
 data class AppConfig(
     val app: AppSection,
     val ollama: OllamaSection,
+    val llm: LlmSection,
     val chunking: ChunkingSection,
     val search: SearchSection,
 )
@@ -24,6 +25,17 @@ data class AppSection(
 data class OllamaSection(
     val baseUrl: String,
     val embeddingModel: String,
+)
+
+/**
+ * Настройки внешнего LLM API для генерации ответа.
+ */
+data class LlmSection(
+    val agentId: String,
+    val userToken: String,
+    val model: String,
+    val temperature: Double,
+    val maxTokens: Int,
 )
 
 /**

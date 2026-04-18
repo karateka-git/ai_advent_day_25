@@ -21,6 +21,13 @@ object AppConfigLoader {
                 baseUrl = config.getString("ollama.baseUrl"),
                 embeddingModel = config.getString("ollama.embeddingModel"),
             ),
+            llm = LlmSection(
+                agentId = config.getString("llm.agentId"),
+                userToken = config.getString("llm.userToken"),
+                model = config.getString("llm.model"),
+                temperature = config.getDouble("llm.temperature"),
+                maxTokens = config.getInt("llm.maxTokens"),
+            ),
             chunking = ChunkingSection(
                 fixedSize = config.getInt("chunking.fixedSize"),
                 overlap = config.getInt("chunking.overlap"),
