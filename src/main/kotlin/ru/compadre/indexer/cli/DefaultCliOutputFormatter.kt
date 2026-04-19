@@ -1,5 +1,7 @@
 package ru.compadre.indexer.cli
 
+import ru.compadre.indexer.search.model.RetrievalCandidate
+import ru.compadre.indexer.search.model.RetrievalPipelineResult
 import ru.compadre.indexer.workflow.result.AskResult
 import ru.compadre.indexer.workflow.result.ChunkEmbeddingPreview
 import ru.compadre.indexer.workflow.result.ChunkPreviewResult
@@ -66,20 +68,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
 
         if (result.mode == "rag") {
             add("")
-            if (result.matches.isEmpty()) {
-                add("Retrieval-сводка:")
-                add("  Контекст не найден.")
-            } else {
-                add("Retrieval-сводка:")
-                result.matches.forEachIndexed { index, match ->
-                    val chunk = match.embeddedChunk.chunk
-                    add("  ${index + 1}. score = ${"%.4f".format(match.score)}")
-                    add("     title = ${chunk.metadata.title}")
-                    add("     filePath = ${chunk.metadata.filePath}")
-                    add("     section = ${chunk.metadata.section}")
-                    add("     preview = ${previewText(chunk.text)}")
-                }
-            }
+            addAll(retrievalSummaryLines(result.retrievalResult, result.matches))
         }
     }.joinToString(separator = System.lineSeparator())
 
@@ -93,20 +82,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  database = ${result.databasePath}")
         add("")
 
-        if (result.matches.isEmpty()) {
-            add("Релевантные чанки не найдены.")
-        } else {
-            add("Найденные чанки:")
-            result.matches.forEachIndexed { index, match ->
-                val chunk = match.embeddedChunk.chunk
-                add("  ${index + 1}. score = ${"%.4f".format(match.score)}")
-                add("     chunkId = ${chunk.metadata.chunkId}")
-                add("     title = ${chunk.metadata.title}")
-                add("     filePath = ${chunk.metadata.filePath}")
-                add("     section = ${chunk.metadata.section}")
-                add("     preview = ${previewText(chunk.text)}")
-            }
-        }
+        addAll(retrievalSummaryLines(result.retrievalResult, result.matches))
     }.joinToString(separator = System.lineSeparator())
 
     private fun indexPersistText(result: IndexPersistResult): String = buildList {
@@ -229,6 +205,81 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("")
         add("Найдено документов: ${result.documents.size}")
     }.joinToString(separator = System.lineSeparator())
+
+    private fun retrievalSummaryLines(
+        retrievalResult: RetrievalPipelineResult?,
+        matches: List<ru.compadre.indexer.search.model.SearchMatch>,
+    ): List<String> = buildList {
+        add("Retrieval-сводка:")
+
+        if (retrievalResult == null) {
+            if (matches.isEmpty()) {
+                add("  Контекст не найден.")
+            } else {
+                add("  Режим pipeline недоступен, показаны только финальные совпадения.")
+                matches.forEachIndexed { index, match ->
+                    addAll(selectedCandidateLines(index + 1, match.embeddedChunk.chunk.metadata.chunkId, match.score, null, null, match.embeddedChunk.chunk.metadata.title, match.embeddedChunk.chunk.metadata.filePath, match.embeddedChunk.chunk.metadata.section, match.embeddedChunk.chunk.text))
+                }
+            }
+            return@buildList
+        }
+
+        add("  mode = ${retrievalResult.mode.configValue}")
+        add("  initialTopK = ${retrievalResult.initialTopK}")
+        add("  finalTopK = ${retrievalResult.finalTopK}")
+        add("  candidatesBefore = ${retrievalResult.initialCandidates.size}")
+        add("  candidatesSelected = ${retrievalResult.selectedCandidates.size}")
+
+        if (retrievalResult.candidates.isEmpty()) {
+            add("  Контекст не найден.")
+            return@buildList
+        }
+
+        add("  Кандидаты pipeline:")
+        retrievalResult.candidates.forEachIndexed { index, candidate ->
+            addAll(candidateLines(index + 1, candidate))
+        }
+    }
+
+    private fun candidateLines(index: Int, candidate: RetrievalCandidate): List<String> {
+        val chunk = candidate.match.embeddedChunk.chunk
+        return buildList {
+            add("  ${index}. selected = ${if (candidate.selected) "yes" else "no"}")
+            add("     cosineScore = ${"%.4f".format(candidate.cosineScore)}")
+            add("     finalScore = ${"%.4f".format(candidate.finalScore)}")
+            candidate.heuristicScore?.let { add("     heuristicScore = ${"%.4f".format(it)}") }
+            candidate.modelScore?.let { add("     modelScore = ${"%.4f".format(it)}") }
+            candidate.filterReason?.let { add("     filterReason = $it") }
+            add("     chunkId = ${chunk.metadata.chunkId}")
+            add("     title = ${chunk.metadata.title}")
+            add("     filePath = ${chunk.metadata.filePath}")
+            add("     section = ${chunk.metadata.section}")
+            add("     preview = ${previewText(chunk.text)}")
+        }
+    }
+
+    private fun selectedCandidateLines(
+        index: Int,
+        chunkId: String,
+        score: Double,
+        heuristicScore: Double?,
+        modelScore: Double?,
+        title: String,
+        filePath: String,
+        section: String,
+        text: String,
+    ): List<String> = buildList {
+        add("  ${index}. selected = yes")
+        add("     cosineScore = ${"%.4f".format(score)}")
+        add("     finalScore = ${"%.4f".format(score)}")
+        heuristicScore?.let { add("     heuristicScore = ${"%.4f".format(it)}") }
+        modelScore?.let { add("     modelScore = ${"%.4f".format(it)}") }
+        add("     chunkId = $chunkId")
+        add("     title = $title")
+        add("     filePath = $filePath")
+        add("     section = $section")
+        add("     preview = ${previewText(text)}")
+    }
 
     private fun previewText(text: String): String {
         if (text.isBlank()) {
