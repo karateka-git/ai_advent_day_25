@@ -7,6 +7,7 @@ import ru.compadre.indexer.search.model.PostRetrievalRequest
 import ru.compadre.indexer.search.model.RetrievalPipelineResult
 import ru.compadre.indexer.search.postprocess.HeuristicFilterPostRetrievalProcessor
 import ru.compadre.indexer.search.postprocess.HeuristicRerankPostRetrievalProcessor
+import ru.compadre.indexer.search.postprocess.ModelRerankPostRetrievalProcessor
 import ru.compadre.indexer.search.postprocess.NoOpPostRetrievalProcessor
 import ru.compadre.indexer.search.postprocess.PostRetrievalProcessor
 import ru.compadre.indexer.search.postprocess.ThresholdPostRetrievalProcessor
@@ -21,6 +22,7 @@ class RetrievalPipelineService(
     private val thresholdPostRetrievalProcessor: PostRetrievalProcessor = ThresholdPostRetrievalProcessor(),
     private val heuristicFilterPostRetrievalProcessor: PostRetrievalProcessor = HeuristicFilterPostRetrievalProcessor(),
     private val heuristicRerankPostRetrievalProcessor: PostRetrievalProcessor = HeuristicRerankPostRetrievalProcessor(),
+    private val modelRerankPostRetrievalProcessor: PostRetrievalProcessor = ModelRerankPostRetrievalProcessor(),
 ) {
     /**
      * Выполняет retrieval и возвращает расширенный результат пайплайна.
@@ -80,9 +82,12 @@ class RetrievalPipelineService(
                 config = config,
             )
 
-            else -> throw IllegalArgumentException(
-                "Режим `${mode.configValue}` будет реализован на следующих этапах.",
+            PostRetrievalMode.MODEL_RERANK -> modelRerankPostRetrievalProcessor.process(
+                request = request,
+                matches = matches,
+                config = config,
             )
+
         }
     }
 }
