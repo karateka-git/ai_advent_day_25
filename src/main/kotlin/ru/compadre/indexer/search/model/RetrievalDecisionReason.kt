@@ -30,6 +30,7 @@ enum class HeuristicFilterReason(
     LOW_KEYWORD_OVERLAP("недостаточное пересечение по ключевым словам"),
     NO_MEANINGFUL_MATCH("не найдено значимых совпадений"),
     DUPLICATE_OF_STRONGER_CANDIDATE("дубликат более сильного кандидата"),
+    TRIMMED_BY_FINAL_TOP_K("не попал в финальный top-K"),
     ;
 
     override val mode: PostRetrievalMode = PostRetrievalMode.HEURISTIC_FILTER
@@ -61,4 +62,3 @@ enum class ModelRerankReason(
 
     override val mode: PostRetrievalMode = PostRetrievalMode.MODEL_RERANK
 }
-

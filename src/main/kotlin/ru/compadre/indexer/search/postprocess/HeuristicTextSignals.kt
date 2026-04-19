@@ -26,6 +26,12 @@ data class HeuristicTextSignals(
         }
 
     /**
+     * Есть ли совпадение по значимым словам в самом тексте чанка.
+     */
+    val hasTextMatch: Boolean
+        get() = queryTerms.any { term -> term in textTerms }
+
+    /**
      * Есть ли совпадение по значимым словам в заголовке чанка.
      */
     val hasTitleMatch: Boolean
@@ -95,4 +101,3 @@ object HeuristicTextSignalExtractor {
 
     private const val MIN_TOKEN_LENGTH = 3
 }
-
