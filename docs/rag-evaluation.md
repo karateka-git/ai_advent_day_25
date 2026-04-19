@@ -136,6 +136,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-rag-evaluation.ps1
 - `data/rag-evaluation-summary.md`
 - `data/rag-evaluation-raw.md`
 
+## Operational note
+
+Full evaluation only works when the external LLM agent is active and reachable. If the agent returns `403` with `code=agent_not_active`, start or reactivate that agent before rerunning the script.
+
+The local RAG stack also has to be up: the embedding/Ollama service used by indexing and retrieval must be available, otherwise the evaluation will fail before the reports are written.
+
 ## Как интерпретировать результат
 
 Для учебного проекта полезно смотреть не только на лучший режим, но и на то, где ломается контракт ответа.

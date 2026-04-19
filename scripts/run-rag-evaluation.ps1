@@ -92,6 +92,42 @@ function Invoke-CliCommand {
     }
 }
 
+function Get-EvaluationFailureHint {
+    param(
+        [string]$Stdout,
+        [string]$Stderr
+    )
+
+    $combined = @($Stdout, $Stderr) -join "`n"
+
+    if ([regex]::IsMatch($combined, '(?i)(agent_not_active|code\s*=\s*agent_not_active|\b403\b|forbidden|access denied)')) {
+        return "The external LLM agent looks inactive or unavailable (`agent_not_active` / 403). Start or reactivate the agent, then rerun the evaluation. Full RAG evaluation also needs the local embedding/Ollama stack to be available."
+    }
+
+    if ([regex]::IsMatch($combined, '(?i)(ollama|embedding|connection refused|timed out)')) {
+        return "The local embedding/Ollama stack looks unavailable. Start the local services before rerunning the evaluation."
+    }
+
+    return ""
+}
+
+function Throw-EvaluationFailure {
+    param(
+        [string]$Stage,
+        [string]$CommandDescription,
+        [string]$Stdout,
+        [string]$Stderr
+    )
+
+    $message = "$Stage failed for command: $CommandDescription`n$Stdout`n$Stderr"
+    $hint = Get-EvaluationFailureHint -Stdout $Stdout -Stderr $Stderr
+    if (-not [string]::IsNullOrWhiteSpace($hint)) {
+        $message += "`nHint: $hint"
+    }
+
+    throw $message
+}
+
 function Normalize-CommandOutput {
     param([string]$Text)
 
@@ -620,7 +656,7 @@ $questions = Get-Content -LiteralPath $DatasetPath -Encoding UTF8 | ConvertFrom-
 $indexCommand = @("index", "--input", $InputDir, "--strategy", $Strategy)
 $indexResult = Invoke-CliCommand -WorkingDirectory $ProjectRoot -BatPath $cliBatPath -Arguments $indexCommand
 if ($indexResult.ExitCode -ne 0) {
-    throw "Indexing failed for command: $($indexCommand -join ' ')`n$($indexResult.Stdout)`n$($indexResult.Stderr)"
+    Throw-EvaluationFailure -Stage "Indexing" -CommandDescription ($indexCommand -join ' ') -Stdout $indexResult.Stdout -Stderr $indexResult.Stderr
 }
 
 $summarySections = New-Object System.Collections.ArrayList
@@ -637,7 +673,7 @@ foreach ($question in $questions) {
         "ask", "--query", [string]$question.question, "--mode", "plain"
     )
     if ($plainRun.ExitCode -ne 0) {
-        throw "Plain evaluation failed for question $($question.id).`n$($plainRun.Stdout)`n$($plainRun.Stderr)"
+        Throw-EvaluationFailure -Stage "Plain evaluation" -CommandDescription "ask --query $($question.question) --mode plain" -Stdout $plainRun.Stdout -Stderr $plainRun.Stderr
     }
 
     $plainAnswer = Extract-AnswerBody -Output $plainRun.Stdout
@@ -674,7 +710,7 @@ foreach ($question in $questions) {
             "--show-all-candidates"
         )
         if ($run.ExitCode -ne 0) {
-            throw "RAG evaluation failed for question $($question.id), mode $($mode.Id).`n$($run.Stdout)`n$($run.Stderr)"
+            Throw-EvaluationFailure -Stage "RAG evaluation" -CommandDescription "ask --query $($question.question) --mode rag --strategy $Strategy --top $TopK --post-mode $($mode.Id) --show-all-candidates" -Stdout $run.Stdout -Stderr $run.Stderr
         }
 
         $answer = Extract-AnswerBody -Output $run.Stdout
