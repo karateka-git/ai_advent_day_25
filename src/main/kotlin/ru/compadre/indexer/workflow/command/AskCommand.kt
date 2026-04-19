@@ -11,4 +11,5 @@ data class AskCommand(
     val strategy: ChunkingStrategy? = null,
     val topK: Int? = null,
     val postMode: String? = null,
+    val showAllCandidates: Boolean = false,
 ) : WorkflowCommand

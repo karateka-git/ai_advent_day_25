@@ -81,6 +81,7 @@ data class AskResult(
     val databasePath: String? = null,
     val matches: List<SearchMatch> = emptyList(),
     val retrievalResult: RetrievalPipelineResult? = null,
+    val showAllCandidates: Boolean = false,
 ) : CommandResult
 
 /**
@@ -93,6 +94,7 @@ data class SearchResult(
     val topK: Int,
     val matches: List<SearchMatch>,
     val retrievalResult: RetrievalPipelineResult? = null,
+    val showAllCandidates: Boolean = false,
 ) : CommandResult
 
 /**

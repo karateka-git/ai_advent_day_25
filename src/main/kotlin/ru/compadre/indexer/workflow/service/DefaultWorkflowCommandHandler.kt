@@ -64,6 +64,7 @@ class DefaultWorkflowCommandHandler(
             query = command.query,
             strategy = command.strategy,
             topK = command.topK,
+            showAllCandidates = command.showAllCandidates,
             config = config,
         )
 
@@ -274,6 +275,7 @@ class DefaultWorkflowCommandHandler(
                     databasePath = databasePath.toAbsolutePath().toString(),
                     matches = ragAnswer.matches,
                     retrievalResult = ragAnswer.retrievalResult,
+                    showAllCandidates = command.showAllCandidates,
                 )
             }
 
@@ -286,6 +288,7 @@ class DefaultWorkflowCommandHandler(
         query: String,
         strategy: ChunkingStrategy?,
         topK: Int?,
+        showAllCandidates: Boolean,
         config: AppConfig,
     ): SearchResult {
         val effectiveStrategy = strategy ?: ChunkingStrategy.FIXED
@@ -312,6 +315,7 @@ class DefaultWorkflowCommandHandler(
             topK = finalTopK,
             matches = retrievalResult.selectedMatches,
             retrievalResult = retrievalResult,
+            showAllCandidates = showAllCandidates,
         )
     }
 

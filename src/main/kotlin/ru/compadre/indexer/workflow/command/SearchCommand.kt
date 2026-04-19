@@ -10,4 +10,5 @@ data class SearchCommand(
     val strategy: ChunkingStrategy?,
     val topK: Int?,
     val postMode: String? = null,
+    val showAllCandidates: Boolean = false,
 ) : WorkflowCommand

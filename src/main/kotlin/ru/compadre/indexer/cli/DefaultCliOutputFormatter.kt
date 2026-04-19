@@ -37,8 +37,8 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  index --input <dir> --all-strategies")
         add("  compare --input <dir>")
         add("  ask --query <text> --mode plain")
-        add("  ask --query <text> --mode rag --strategy <fixed|structured> --top <N> --post-mode <mode>")
-        add("  search --query <text> --strategy <fixed|structured> --top <N> --post-mode <mode>")
+        add("  ask --query <text> --mode rag --strategy <fixed|structured> --top <N> --post-mode <mode> --show-all-candidates")
+        add("  search --query <text> --strategy <fixed|structured> --top <N> --post-mode <mode> --show-all-candidates")
         add("  set --post-mode <none|threshold-filter|heuristic-filter|heuristic-rerank|model-rerank|config>")
         add("  help")
         add("")
@@ -83,7 +83,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
 
         if (result.mode == "rag") {
             add("")
-            addAll(retrievalSummaryLines(result.retrievalResult, result.matches))
+            addAll(retrievalSummaryLines(result.retrievalResult, result.matches, result.showAllCandidates))
         }
     }.joinToString(separator = System.lineSeparator())
 
@@ -97,7 +97,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  database = ${result.databasePath}")
         add("")
 
-        addAll(retrievalSummaryLines(result.retrievalResult, result.matches))
+        addAll(retrievalSummaryLines(result.retrievalResult, result.matches, result.showAllCandidates))
     }.joinToString(separator = System.lineSeparator())
 
     private fun indexPersistText(result: IndexPersistResult): String = buildList {
@@ -224,6 +224,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
     private fun retrievalSummaryLines(
         retrievalResult: RetrievalPipelineResult?,
         matches: List<ru.compadre.indexer.search.model.SearchMatch>,
+        showAllCandidates: Boolean,
     ): List<String> = buildList {
         add("Retrieval-сводка:")
 
@@ -258,8 +259,13 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
             return@buildList
         }
 
-        add("  Финальные кандидаты:")
-        retrievalResult.selectedCandidates.forEachIndexed { index, candidate ->
+        val candidatesToRender = if (showAllCandidates) {
+            retrievalResult.finalCandidates
+        } else {
+            retrievalResult.selectedCandidates
+        }
+        add(if (showAllCandidates) "  Все кандидаты pipeline:" else "  Финальные кандидаты:")
+        candidatesToRender.forEachIndexed { index, candidate ->
             addAll(candidateLines(index + 1, candidate, retrievalResult.mode))
         }
     }

@@ -72,6 +72,7 @@ class DefaultCliCommandParser : CliCommandParser {
         }
         val topK = findIntOption(args, "--top")
         val postMode = findPostModeOption(args, "--post-mode")
+        val showAllCandidates = hasFlag(args, "--show-all-candidates")
 
         if (mode !in SUPPORTED_ASK_MODES) {
             throw IllegalArgumentException("Для `ask --mode` поддерживаются только значения `plain` и `rag`.")
@@ -91,6 +92,7 @@ class DefaultCliCommandParser : CliCommandParser {
             strategy = strategy,
             topK = topK,
             postMode = postMode,
+            showAllCandidates = showAllCandidates,
         )
     }
 
@@ -108,12 +110,14 @@ class DefaultCliCommandParser : CliCommandParser {
                 throw IllegalArgumentException("Для `search --top` требуется целое число.")
             }
         val postMode = findPostModeOption(args, "--post-mode")
+        val showAllCandidates = hasFlag(args, "--show-all-candidates")
 
         return SearchCommand(
             query = query,
             strategy = strategy,
             topK = topK,
             postMode = postMode,
+            showAllCandidates = showAllCandidates,
         )
     }
 
@@ -145,6 +149,9 @@ class DefaultCliCommandParser : CliCommandParser {
         return value.toIntOrNull()
             ?: throw IllegalArgumentException("Для опции `$optionName` требуется целое число.")
     }
+
+    private fun hasFlag(args: Array<String>, flagName: String): Boolean =
+        args.any { argument -> argument.equals(flagName, ignoreCase = true) }
 
     private fun findPostModeOption(args: Array<String>, optionName: String): String? {
         val rawValue = findOption(args, optionName) ?: return null
