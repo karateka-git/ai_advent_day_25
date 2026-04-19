@@ -27,10 +27,6 @@ if (-not $RawOutputPath) {
 }
 
 $ragModes = @(
-    @{ Id = "none"; Label = "RAG None" },
-    @{ Id = "threshold-filter"; Label = "RAG Threshold Filter" },
-    @{ Id = "heuristic-filter"; Label = "RAG Heuristic Filter" },
-    @{ Id = "heuristic-rerank"; Label = "RAG Heuristic Rerank" },
     @{ Id = "model-rerank"; Label = "RAG Model Rerank" }
 )
 
@@ -768,7 +764,7 @@ foreach ($question in $questions) {
 }
 
 $summaryHeader = @(
-    "# RAG mode comparison by question",
+    "# RAG model-rerank evaluation by question",
     "",
     "Auto-generated report for docs/articles/doroshevich.",
     "",
@@ -776,7 +772,7 @@ $summaryHeader = @(
     "- input = $InputDir",
     "- strategy = $Strategy",
     "- topK = $TopK",
-    "- post-modes = none, threshold-filter, heuristic-filter, heuristic-rerank, model-rerank",
+    "- post-modes = model-rerank",
     "",
     "Summary rubric:",
     "- success - the answer is grounded, has sources and quotes, and the quotes overlap with the answer",
@@ -784,10 +780,6 @@ $summaryHeader = @(
     "- fail - support is weak, the output lacks structure, or the answer drifts away from the retrieval",
     "",
     "Mode wins:",
-    ("- none: {0} wins" -f $modeWinCounters["none"]),
-    ("- threshold-filter: {0} wins" -f $modeWinCounters["threshold-filter"]),
-    ("- heuristic-filter: {0} wins" -f $modeWinCounters["heuristic-filter"]),
-    ("- heuristic-rerank: {0} wins" -f $modeWinCounters["heuristic-rerank"]),
     ("- model-rerank: {0} wins" -f $modeWinCounters["model-rerank"])
 ) -join "`n"
 
@@ -800,7 +792,7 @@ $rawHeader = @(
     "- input = $InputDir",
     "- strategy = $Strategy",
     "- topK = $TopK",
-    "- all RAG runs use --show-all-candidates",
+    "- all RAG runs use --post-mode model-rerank --show-all-candidates",
     "- raw output splits each run into answer / sources / quotes / retrieval blocks"
 ) -join "`n"
 
