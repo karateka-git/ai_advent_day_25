@@ -1,198 +1,149 @@
 # local-document-indexer
 
-Учебный Kotlin-проект, выросший из `day_22`.
+Учебный Kotlin-проект, выросший из `day_23`.
 
-Если в `day_22` проект уже умел:
+Если в `day_23` основной фокус был на **post-retrieval этапе** и сравнении режимов `none / threshold-filter / heuristic-filter / heuristic-rerank / model-rerank`, то в `day_24` в этой сессии акцент сместился на **explainable RAG**:
 
-- индексировать корпус;
-- искать чанки по embeddings;
-- отвечать в режимах `plain` и `rag`;
-- сравнивать baseline RAG с `plain`;
+- ответ должен содержать источники;
+- ответ должен содержать цитаты;
+- при слабом контексте ассистент должен честно сказать `не знаю` и попросить уточнение;
+- evaluation должен проверять не только сам ответ, но и его опору на найденный контекст.
 
-то в `day_24` основной фокус смещён на **второй этап retrieval**:
+## Что изменилось в этой сессии
 
-- post-retrieval filtering;
-- heuristic reranking;
-- model-based reranking;
-- сравнение режимов на контрольных вопросах.
+### 1. Структурированный RAG-ответ
 
-## Что добавлено в этой сессии
+Обычный текстовый ответ заменён на более явный контракт:
 
-В проект внедрён единый post-retrieval pipeline после первичного vector search.
+- `answer`
+- `sources`
+- `quotes`
+- `isRefusal`
+- `refusalReason`
+- `warningMessage`
 
-Новый пайплайн выглядит так:
+Это позволяет отделить:
 
-`query -> embedding search -> topK before -> post-processing -> topK after -> prompt -> LLM`
+- сам ответ;
+- доказательную базу ответа;
+- честный отказ;
+- предупреждение о том, что ответ не удалось подтвердить цитатами.
 
-Добавлены режимы:
+### 2. Источники теперь обязательная часть ответа
+
+Для `ask --mode rag` CLI показывает отдельный блок `Источники`.
+
+Источник строится не из свободного текста модели, а из retrieval-результата. Для каждого источника выводятся:
+
+- `source`
+- `section`
+- `chunkId`
+
+Это делает ответ более объяснимым и уменьшает риск галлюцинаций на уровне ссылок на контекст.
+
+### 3. Цитаты теперь отдельный слой объяснимости
+
+Модель получает найденный контекст и должна вернуть:
+
+- основной ответ;
+- список цитат из выбранных чанков.
+
+Если цитаты есть, CLI показывает отдельный блок `Цитаты`.
+
+Если модель вернула ответ, но не смогла дать цитаты:
+
+- ответ всё равно показывается;
+- добавляется предупреждение:
+  `Не удалось подтвердить этот ответ цитатами из найденного контекста.`
+
+Пустой блок `Цитаты` в CLI не печатается.
+
+### 4. Добавлен guard на слабый контекст
+
+Перед генерацией ответа в `rag` проверяется, достаточно ли силён retrieval-контекст.
+
+Сейчас guard опирается на:
+
+- наличие выбранных чанков;
+- `minSelectedChunks`;
+- `minTopScore`.
+
+Если guard считает контекст слишком слабым, модель не должна строить обычный ответ и возвращается ответ в духе:
+
+`не знаю. Уточните вопрос: в найденном контексте недостаточно данных для уверенного ответа.`
+
+Важно: текущая реализация хорошо ловит действительно пустой или очень слабый retrieval, но ещё не полностью защищает от случаев, когда similarity высокий, а контекст по смыслу всё равно нерелевантен.
+
+### 5. Логирование проблемного ответа модели
+
+Если модель:
+
+- возвращает невалидный JSON;
+- не возвращает обязательные поля;
+- не возвращает цитаты;
+
+сырой ответ модели логируется в файл:
+
+- `data/logs/rag-llm-format.log`
+
+Это удобно для отладки prompt-а, парсинга и проблем с цитатами без засорения основного CLI-вывода.
+
+### 6. CLI-вывод стал чище
+
+В `ask --mode rag` сейчас показываются:
+
+- `Ответ`
+- `Источники`
+- `Цитаты` — только если они реально есть
+
+Из CLI-вывода убраны:
+
+- внутренние технические причины parse failure;
+- служебный `Retrieval-сводка` в обычном `ask`-сценарии.
+
+Retrieval-диагностика остаётся полезной, но теперь не мешает основному UX.
+
+### 7. Evaluation расширен под explainable RAG
+
+Скрипт:
+
+- `scripts/run-rag-evaluation.ps1`
+
+теперь ориентирован не только на качество ответа, но и на explainability-проверки:
+
+- есть ли источники;
+- есть ли цитаты;
+- есть ли overlap между ответом и цитатами;
+- есть ли refusal там, где контекст слабый.
+
+Основные артефакты:
+
+- `data/rag-evaluation-summary.md`
+- `data/rag-evaluation-raw.md`
+
+Дополнительно для ручной учебной проверки использовался отчёт:
+
+- `data/ten-question-citation-check.md`
+
+## Что осталось от day_23
+
+Из `day_23` в проекте по-прежнему остаётся базовый post-retrieval каркас:
 
 - `none`
 - `threshold-filter`
 - `heuristic-filter`
 - `heuristic-rerank`
 - `model-rerank`
-
-Также добавлены:
-
-- `initialTopK` и `finalTopK`;
-- типизированные причины решений pipeline;
-- ранги кандидатов `initialRank/finalRank`;
-- runtime-переключение post-mode внутри CLI;
-- debug-вывод полного списка кандидатов;
-- новый evaluation-скрипт и два отчёта:
-  - краткий `summary`;
-  - подробный `raw`.
-
-## Режимы post-retrieval
-
-### `none`
-
-Baseline-поведение без второго этапа.
-
-### `threshold-filter`
-
-Отсекает кандидатов ниже similarity-порога и затем оставляет `finalTopK`.
-
-### `heuristic-filter`
-
-Rule-based фильтр. Использует несколько explainable-сигналов:
-
-- cosine similarity;
-- lexical overlap;
-- exact match;
-- title/section match;
-- duplicate check.
-
-Коротко по роли сигналов:
-
-- `cosine similarity` — базовый embedding-score после первого этапа поиска;
-- `lexical overlap` — пересечение значимых слов вопроса и текста чанка;
-- `exact match` — бонус, если значимые слова вопроса встретились прямо в тексте чанка;
-- `title/section match` — дополнительные бонусы за совпадения в метаданных;
-- `duplicate check` — отсев почти одинаковых чанков, чтобы не тратить `finalTopK` на повторы.
-
-Сейчас `heuristic-filter` не переставляет кандидатов, а только решает, кого оставить в финальном контексте.
-
-### `heuristic-rerank`
-
-Не только фильтрует, а заново сортирует кандидатов по `heuristicScore`.
-
-Это сейчас самый сильный rule-based режим в проекте.
-
-### `model-rerank`
-
-Использует тот же внешний LLM API, что и генерация ответа.
-
-Модель получает:
-
-- `query`
-- `title`
-- `section`
-- `chunk text`
-
-И возвращает JSON вида:
-
-```json
-{"score": 83}
-```
-
-После этого кандидаты пересортируются по `modelScore`, а `cosineScore` используется как tie-breaker.
-
-## Как переключать режимы
-
-### Разовый override для команды
-
-```text
-ask --query "..." --mode rag --strategy structured --top 3 --post-mode heuristic-rerank
-```
 
 Поддерживаются:
 
-- `none`
-- `threshold-filter`
-- `heuristic-filter`
-- `heuristic-rerank`
-- `model-rerank`
+- разовый override через `--post-mode`
+- session override через `set --post-mode ...`
+- подробный retrieval-анализ через `search` и evaluation-отчёты
 
-### Session override внутри CLI
+То есть `day_24` не отменяет сделанное в `day_23`, а надстраивает поверх него слой explainable answer generation.
 
-```text
-set --post-mode none
-set --post-mode heuristic-rerank
-set --post-mode model-rerank
-set --post-mode config
-```
-
-`config` сбрасывает override и возвращает режим из `application.conf`.
-
-## Обычный и debug-вывод
-
-По умолчанию CLI показывает только финальные выбранные чанки.
-
-Если нужен полный разбор retrieval pipeline, можно включить debug-флаг:
-
-```text
-ask --query "..." --mode rag --strategy structured --top 3 --post-mode model-rerank --show-all-candidates
-```
-
-Это удобно для анализа:
-
-- кто попал в `initialTopK`;
-- кто был отфильтрован;
-- кто поднялся после rerank;
-- какие `decisionReason` сработали.
-
-## Evaluation
-
-Для сравнения режимов добавлен сценарий:
-
-- [scripts/run-rag-evaluation.ps1](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/scripts/run-rag-evaluation.ps1)
-
-Он:
-
-1. Индексирует корпус `docs/articles/doroshevich`.
-2. Прогоняет контрольные вопросы в режимах:
-   - `plain`
-   - `rag + none`
-   - `rag + threshold-filter`
-   - `rag + heuristic-filter`
-   - `rag + heuristic-rerank`
-   - `rag + model-rerank`
-3. Строит два отчёта:
-  - [data/rag-evaluation-summary.md](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/data/rag-evaluation-summary.md)
-  - [data/rag-evaluation-raw.md](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/data/rag-evaluation-raw.md)
-
-Подробное описание формата лежит в:
-
-- [docs/rag-evaluation.md](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/docs/rag-evaluation.md)
-
-## Краткие результаты сравнения режимов
-
-По итогам полного evaluation на 10 контрольных вопросах:
-
-- `Plain`: `0 success / 1 partial / 9 fail`
-- `RAG None`: `3 / 0 / 7`
-- `Threshold Filter`: `3 / 0 / 7`
-- `Heuristic Filter`: `3 / 0 / 7`
-- `Heuristic Rerank`: `4 / 0 / 6`
-- `Model Rerank`: `3 / 2 / 5`
-
-По числу побед по вопросам:
-
-- `none`: `7`
-- `threshold-filter`: `7`
-- `heuristic-filter`: `8`
-- `heuristic-rerank`: `9`
-- `model-rerank`: `9`
-
-Короткий вывод:
-
-- `threshold-filter` почти не улучшает baseline;
-- `heuristic-filter` помогает, но иногда режет слишком агрессивно;
-- `heuristic-rerank` сейчас выглядит самым сильным и стабильным режимом;
-- `model-rerank` полезен на части сложных вопросов, но не всегда лучше эвристического реранка.
-
-## Быстрый запуск
+## Как запускать
 
 ### 1. Сборка и запуск CLI
 
@@ -206,31 +157,75 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-manual-check.ps1
 index --input ./docs/articles/doroshevich --strategy structured
 ```
 
-### 3. Проверить один режим
+### 3. Проверить 3 характерных сценария
+
+#### Есть ответ и цитаты
 
 ```text
-ask --query "В чём проклятие Агасфера и почему слово Иди так важно в этом тексте?" --mode rag --strategy structured --top 3 --post-mode heuristic-rerank
+ask --query "Как в тексте «Реформа» описывается рождение богини Реформы?" --mode rag --strategy structured --top 3 --post-mode heuristic-rerank
 ```
 
-### 4. Запустить полный evaluation
+Ожидается:
+
+- есть `Ответ`
+- есть `Источники`
+- есть `Цитаты`
+
+#### Есть ответ, но нет цитат
+
+```text
+ask --query "Как в тексте «Аден» описываются основные цвета города и берега?" --mode rag --strategy structured --top 3 --post-mode heuristic-rerank
+```
+
+Ожидается:
+
+- есть `Ответ`
+- есть `Источники`
+- блока `Цитаты` нет
+- есть предупреждение о том, что ответ не удалось подтвердить цитатами
+
+#### Контекст слишком слабый, срабатывает `не знаю`
+
+```text
+ask --query "Как в тексте «Босфор» объясняется происхождение Босфора?" --mode rag --strategy structured --top 3 --post-mode heuristic-filter
+```
+
+Ожидается:
+
+- после `heuristic-filter` не остаётся подходящих кандидатов;
+- срабатывает guard;
+- выводится ответ в духе `не знаю. Уточните вопрос ...`
+
+## Полный evaluation
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-rag-evaluation.ps1
 ```
 
-## Полезные артефакты
+После запуска полезно посмотреть:
 
-- [docs/control-questions.json](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/docs/control-questions.json)
-- [docs/control-questions.md](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/docs/control-questions.md)
-- [docs/rag-evaluation.md](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/docs/rag-evaluation.md)
-- [data/rag-evaluation-summary.md](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/data/rag-evaluation-summary.md)
-- [data/rag-evaluation-raw.md](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_24/data/rag-evaluation-raw.md)
+- `data/rag-evaluation-summary.md`
+- `data/rag-evaluation-raw.md`
+- `data/ten-question-citation-check.md`
 
-## Что важно помнить
+## Полезные файлы
 
-Текущий `day_24` не про новый storage или новый UI. Его основная задача в рамках этой сессии:
+- `docs/control-questions.json`
+- `docs/control-questions.md`
+- `docs/rag-evaluation.md`
+- `docs/rag-citations-spec.md`
+- `scripts/run-rag-evaluation.ps1`
+- `data/rag-evaluation-summary.md`
+- `data/rag-evaluation-raw.md`
+- `data/ten-question-citation-check.md`
 
-- усилить retrieval вторым этапом;
-- сделать это в нескольких вариантах;
-- дать удобный способ переключать режимы;
-- показать сравнение режимов на одном и том же наборе вопросов.
+## Что важно понимать
+
+Текущий `day_24` — это учебный проект про наблюдаемый и объяснимый RAG, а не просто про “получить какой угодно ответ от модели”.
+
+Главные идеи этой сессии:
+
+- retrieval и generation нужно разделять;
+- источники и цитаты делают RAG проверяемым;
+- честный отказ так же важен, как хороший ответ;
+- evaluation должен проверять не только формулировку ответа, но и его groundedness.

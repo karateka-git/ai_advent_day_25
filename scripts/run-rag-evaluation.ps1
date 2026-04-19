@@ -713,10 +713,22 @@ foreach ($question in $questions) {
             Throw-EvaluationFailure -Stage "RAG evaluation" -CommandDescription "ask --query $($question.question) --mode rag --strategy $Strategy --top $TopK --post-mode $($mode.Id) --show-all-candidates" -Stdout $run.Stdout -Stderr $run.Stderr
         }
 
+        $searchRun = Invoke-CliCommand -WorkingDirectory $ProjectRoot -BatPath $cliBatPath -Arguments @(
+            "search",
+            "--query", [string]$question.question,
+            "--strategy", $Strategy,
+            "--top", "$TopK",
+            "--post-mode", $mode.Id,
+            "--show-all-candidates"
+        )
+        if ($searchRun.ExitCode -ne 0) {
+            Throw-EvaluationFailure -Stage "RAG retrieval evaluation" -CommandDescription "search --query $($question.question) --strategy $Strategy --top $TopK --post-mode $($mode.Id) --show-all-candidates" -Stdout $searchRun.Stdout -Stderr $searchRun.Stderr
+        }
+
         $answer = Extract-AnswerBody -Output $run.Stdout
         $sources = Extract-SourcesBlock -Output $run.Stdout
         $quotes = Extract-QuotesBlock -Output $run.Stdout
-        $retrieval = Extract-RetrievalBody -Output $run.Stdout
+        $retrieval = Extract-RetrievalBody -Output $searchRun.Stdout
         $evaluation = Evaluate-RunResult `
             -ModeId $mode.Id `
             -Answer $answer `

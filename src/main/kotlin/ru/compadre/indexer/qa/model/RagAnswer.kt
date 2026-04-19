@@ -27,6 +27,7 @@ data class RagAnswer(
     val answer: String,
     val sources: List<RagSource> = emptyList(),
     val quotes: List<RagQuote> = emptyList(),
+    val warningMessage: String? = null,
     val isRefusal: Boolean = false,
     val refusalReason: String? = null,
     val retrievalResult: RetrievalPipelineResult,

@@ -4,11 +4,12 @@ import ru.compadre.indexer.qa.model.RagAnswer
 import ru.compadre.indexer.search.model.PostRetrievalMode
 import ru.compadre.indexer.search.model.RetrievalCandidate
 import ru.compadre.indexer.search.model.RetrievalPipelineResult
+import ru.compadre.indexer.search.model.SearchMatch
 import ru.compadre.indexer.workflow.result.AskResult
 import ru.compadre.indexer.workflow.result.ChunkEmbeddingPreview
 import ru.compadre.indexer.workflow.result.ChunkPreviewResult
-import ru.compadre.indexer.workflow.result.CompareReportResult
 import ru.compadre.indexer.workflow.result.CommandResult
+import ru.compadre.indexer.workflow.result.CompareReportResult
 import ru.compadre.indexer.workflow.result.DocumentLoadResult
 import ru.compadre.indexer.workflow.result.HelpResult
 import ru.compadre.indexer.workflow.result.IndexPersistResult
@@ -16,7 +17,7 @@ import ru.compadre.indexer.workflow.result.PostModeUpdateResult
 import ru.compadre.indexer.workflow.result.SearchResult
 
 /**
- * Formatter for CLI output used in the project.
+ * Форматтер CLI-вывода для проекта.
  */
 class DefaultCliOutputFormatter : CliOutputFormatter {
     override fun format(result: CommandResult): String = when (result) {
@@ -33,7 +34,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
     private fun helpText(result: HelpResult): String = buildList {
         add("Local Document Indexer")
         add("")
-        add("Р”РѕСЃС‚СѓРїРЅС‹Рµ РєРѕРјР°РЅРґС‹:")
+        add("Доступные команды:")
         add("  index --input <dir> --strategy <fixed|structured>")
         add("  index --input <dir> --all-strategies")
         add("  compare --input <dir>")
@@ -43,7 +44,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  set --post-mode <none|threshold-filter|heuristic-filter|heuristic-rerank|model-rerank|config>")
         add("  help")
         add("")
-        add("РўРµРєСѓС‰РёР№ РєРѕРЅС„РёРі:")
+        add("Текущий конфиг:")
         add("  inputDir = ${result.inputDir}")
         add("  outputDir = ${result.outputDir}")
         add("  ollama.baseUrl = ${result.ollamaBaseUrl}")
@@ -52,50 +53,47 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  chunking.overlap = ${result.overlap}")
         add("  search.postProcessingMode = ${result.postProcessingMode}")
         add("")
-        add("РўРµРєСѓС‰РёР№ СЃС‚Р°С‚СѓСЃ: index СЃРѕС…СЂР°РЅСЏРµС‚ SQLite-РёРЅРґРµРєСЃ, compare СЃС‚СЂРѕРёС‚ comparison.md, ask РїРѕРґРґРµСЂР¶РёРІР°РµС‚ plain Рё rag, search РїРѕРєР°Р·С‹РІР°РµС‚ retrieval topK.")
+        add("Текущий статус: index сохраняет SQLite-индекс, compare строит comparison.md, ask поддерживает plain и rag, search показывает retrieval topK.")
     }.joinToString(separator = System.lineSeparator())
 
     private fun postModeUpdateText(result: PostModeUpdateResult): String = buildList {
         if (result.resetToConfig) {
-            add("Runtime override post-mode СЃР±СЂРѕС€РµРЅ.")
-            add("РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ Р·РЅР°С‡РµРЅРёРµ РёР· РєРѕРЅС„РёРіР°: ${result.effectivePostMode}")
+            add("Runtime override post-mode сброшен.")
+            add("Используется значение из конфига: ${result.effectivePostMode}")
         } else {
-            add("Runtime override post-mode РѕР±РЅРѕРІР»С‘РЅ.")
-            add("РќРѕРІС‹Р№ СЂРµР¶РёРј: ${result.effectivePostMode}")
+            add("Runtime override post-mode обновлён.")
+            add("Новый режим: ${result.effectivePostMode}")
         }
     }.joinToString(separator = System.lineSeparator())
 
     private fun askText(result: AskResult): String = buildList {
-        add("РљРѕРјР°РЅРґР° `ask` РїРѕР»СѓС‡РёР»Р° РѕС‚РІРµС‚ РјРѕРґРµР»Рё.")
+        add("Команда `ask` получила ответ модели.")
         add("")
-        add("РџР°СЂР°РјРµС‚СЂС‹ Р·Р°РїСѓСЃРєР°:")
+        add("Параметры запуска:")
         add("  mode = ${result.mode}")
         add("  query = ${result.query}")
 
         if (result.mode == "rag") {
-            add("  strategy = ${result.strategyLabel ?: "<РЅРµ СѓРєР°Р·Р°РЅР°>"}")
+            add("  strategy = ${result.strategyLabel ?: "<не указана>"}")
             add("  topK = ${result.topK ?: 0}")
-            add("  database = ${result.databasePath ?: "<РЅРµ СѓРєР°Р·Р°РЅР°>"}")
+            add("  database = ${result.databasePath ?: "<не указана>"}")
         }
 
         add("")
-        add("РћС‚РІРµС‚:")
-        result.ragAnswer?.takeIf { it.isRefusal }?.let { ragAnswer ->
-            add("Режим: refusal")
-            ragAnswer.refusalReason?.let { reason ->
-                add("Причина: $reason")
-            }
-            add("")
-        }
+        add("Ответ:")
         add(result.ragAnswer?.answer ?: result.answer)
+        result.ragAnswer?.warningMessage?.let { warning ->
+            add("")
+            add(warning)
+        }
 
         if (result.mode == "rag") {
             add("")
             addAll(sourcesLines(result.ragAnswer))
-            add("")
-            addAll(quotesLines(result.ragAnswer))
-            add("")
-            addAll(retrievalSummaryLines(result.retrievalResult, result.matches, result.showAllCandidates))
+            quotesLines(result.ragAnswer)?.let { quoteLines ->
+                add("")
+                addAll(quoteLines)
+            }
         }
     }.joinToString(separator = System.lineSeparator())
 
@@ -115,55 +113,54 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         }
     }
 
-    private fun quotesLines(ragAnswer: RagAnswer?): List<String> = buildList {
-        add("Цитаты:")
-
+    private fun quotesLines(ragAnswer: RagAnswer?): List<String>? {
         val quotes = ragAnswer?.quotes.orEmpty()
         if (quotes.isEmpty()) {
-            add("  <цитаты пока не собраны>")
-            return@buildList
+            return null
         }
 
-        quotes.forEachIndexed { index, quote ->
-            add("  ${index + 1}. chunkId = ${quote.chunkId}")
-            add("     quote = ${quote.quote}")
+        return buildList {
+            add("Цитаты:")
+            quotes.forEachIndexed { index, quote ->
+                add("  ${index + 1}. chunkId = ${quote.chunkId}")
+                add("     quote = ${quote.quote}")
+            }
         }
     }
 
     private fun searchText(result: SearchResult): String = buildList {
-        add("РљРѕРјР°РЅРґР° `search` РІС‹РїРѕР»РЅРёР»Р° semantic search.")
+        add("Команда `search` выполнила semantic search.")
         add("")
-        add("РџР°СЂР°РјРµС‚СЂС‹ Р·Р°РїСѓСЃРєР°:")
+        add("Параметры запуска:")
         add("  query = ${result.query}")
         add("  strategy = ${result.strategyLabel}")
         add("  topK = ${result.topK}")
         add("  database = ${result.databasePath}")
         add("")
-
         addAll(retrievalSummaryLines(result.retrievalResult, result.matches, result.showAllCandidates))
     }.joinToString(separator = System.lineSeparator())
 
     private fun indexPersistText(result: IndexPersistResult): String = buildList {
-        add("РљРѕРјР°РЅРґР° `index` Р·Р°РІРµСЂС€РёР»Р° Р»РѕРєР°Р»СЊРЅСѓСЋ РёРЅРґРµРєСЃР°С†РёСЋ.")
+        add("Команда `index` завершила локальную индексацию.")
         add("")
-        add("РџР°СЂР°РјРµС‚СЂС‹ Р·Р°РїСѓСЃРєР°:")
+        add("Параметры запуска:")
         add("  inputDir = ${result.inputDir}")
         add("  strategy = ${result.strategyLabel}")
         add("  outputDir = ${result.outputDir}")
         add("  database = ${result.databasePath}")
         add("")
-        add("РЎРІРѕРґРєР° РёРЅРґРµРєСЃР°С†РёРё:")
-        add("  РљРѕР»РёС‡РµСЃС‚РІРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ = ${result.documentsCount}")
-        add("  РџРѕРґРіРѕС‚РѕРІР»РµРЅРѕ С‡Р°РЅРєРѕРІ = ${result.chunksPrepared}")
-        add("  РЎРѕС…СЂР°РЅРµРЅРѕ С‡Р°РЅРєРѕРІ = ${result.chunksStored}")
-        add("  РЎРѕС…СЂР°РЅРµРЅРѕ embeddings = ${result.embeddingsStored}")
-        add("  РЎС‚СЂР°С‚РµРіРёРё РІ РёРЅРґРµРєСЃРµ = ${result.strategiesStored.joinToString()}")
+        add("Сводка индексации:")
+        add("  Количество документов = ${result.documentsCount}")
+        add("  Подготовлено чанков = ${result.chunksPrepared}")
+        add("  Сохранено чанков = ${result.chunksStored}")
+        add("  Сохранено embeddings = ${result.embeddingsStored}")
+        add("  Стратегии в индексе = ${result.strategiesStored.joinToString()}")
 
         if (result.skippedChunkIds.isEmpty()) {
-            add("  РџСЂРѕРїСѓС‰РµРЅРѕ С‡Р°РЅРєРѕРІ = 0")
+            add("  Пропущено чанков = 0")
         } else {
-            add("  РџСЂРѕРїСѓС‰РµРЅРѕ С‡Р°РЅРєРѕРІ = ${result.skippedChunkIds.size}")
-            add("РџСЂРѕРїСѓС‰РµРЅРЅС‹Рµ С‡Р°РЅРєРё:")
+            add("  Пропущено чанков = ${result.skippedChunkIds.size}")
+            add("Пропущенные чанки:")
             result.skippedChunkIds.take(10).forEach { chunkId ->
                 add("  - $chunkId")
             }
@@ -171,31 +168,31 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
     }.joinToString(separator = System.lineSeparator())
 
     private fun compareReportText(result: CompareReportResult): String = buildList {
-        add("РљРѕРјР°РЅРґР° `compare` Р·Р°РІРµСЂС€РёР»Р° СЃСЂР°РІРЅРµРЅРёРµ СЃС‚СЂР°С‚РµРіРёР№ chunking.")
+        add("Команда `compare` завершила сравнение стратегий chunking.")
         add("")
-        add("РџР°СЂР°РјРµС‚СЂС‹ Р·Р°РїСѓСЃРєР°:")
+        add("Параметры запуска:")
         add("  inputDir = ${result.inputDir}")
         add("  outputDir = ${result.outputDir}")
         add("  report = ${result.reportPath}")
         add("")
-        add("РЎРІРѕРґРєР°:")
-        add("  РљРѕР»РёС‡РµСЃС‚РІРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ = ${result.report.documentsCount}")
-        add("  Fixed: РєРѕР»РёС‡РµСЃС‚РІРѕ С‡Р°РЅРєРѕРІ = ${result.report.fixedMetrics.chunksCount}")
-        add("  Fixed: СЃСЂРµРґРЅСЏСЏ РґР»РёРЅР° = ${result.report.fixedMetrics.averageLength.toInt()}")
-        add("  Structured: РєРѕР»РёС‡РµСЃС‚РІРѕ С‡Р°РЅРєРѕРІ = ${result.report.structuredMetrics.chunksCount}")
-        add("  Structured: СЃСЂРµРґРЅСЏСЏ РґР»РёРЅР° = ${result.report.structuredMetrics.averageLength.toInt()}")
+        add("Сводка:")
+        add("  Количество документов = ${result.report.documentsCount}")
+        add("  Fixed: количество чанков = ${result.report.fixedMetrics.chunksCount}")
+        add("  Fixed: средняя длина = ${result.report.fixedMetrics.averageLength.toInt()}")
+        add("  Structured: количество чанков = ${result.report.structuredMetrics.chunksCount}")
+        add("  Structured: средняя длина = ${result.report.structuredMetrics.averageLength.toInt()}")
         add("")
-        add("Р Р°СЃРїСЂРµРґРµР»РµРЅРёРµ РґР»РёРЅ РґР»СЏ fixed:")
+        add("Распределение длин для fixed:")
         if (result.report.fixedMetrics.lengthBuckets.isEmpty()) {
-            add("  - РїСѓСЃС‚Рѕ")
+            add("  - пусто")
         } else {
             result.report.fixedMetrics.lengthBuckets.forEach { bucket ->
                 add("  - ${bucket.rangeLabel}: ${bucket.count}")
             }
         }
-        add("Р Р°СЃРїСЂРµРґРµР»РµРЅРёРµ РґР»РёРЅ РґР»СЏ structured:")
+        add("Распределение длин для structured:")
         if (result.report.structuredMetrics.lengthBuckets.isEmpty()) {
-            add("  - РїСѓСЃС‚Рѕ")
+            add("  - пусто")
         } else {
             result.report.structuredMetrics.lengthBuckets.forEach { bucket ->
                 add("  - ${bucket.rangeLabel}: ${bucket.count}")
@@ -204,28 +201,28 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
     }.joinToString(separator = System.lineSeparator())
 
     private fun chunkPreviewText(result: ChunkPreviewResult): String = buildList {
-        add("РљРѕРјР°РЅРґР° `${result.commandName}` РІС‹РїРѕР»РЅРёР»Р° preview chunking.")
+        add("Команда `${result.commandName}` выполнила preview chunking.")
         add("")
-        add("РџР°СЂР°РјРµС‚СЂС‹ Р·Р°РїСѓСЃРєР°:")
+        add("Параметры запуска:")
         add("  inputDir = ${result.inputDir}")
         add("  strategy = ${result.strategyLabel}")
         add("  outputDir = ${result.outputDir}")
         add("")
-        add("РќР°Р№РґРµРЅРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ: ${result.documents.size}")
-        add("РЎС„РѕСЂРјРёСЂРѕРІР°РЅРѕ С‡Р°РЅРєРѕРІ: ${result.chunks.size}")
+        add("Найдено документов: ${result.documents.size}")
+        add("Сформировано чанков: ${result.chunks.size}")
 
         val byStrategy = result.chunks.groupBy { it.strategy }
         if (byStrategy.isNotEmpty()) {
-            add("Р§Р°РЅРєРѕРІ РїРѕ СЃС‚СЂР°С‚РµРіРёСЏРј:")
+            add("Чанков по стратегиям:")
             byStrategy.forEach { (strategy, chunks) ->
                 add("  - ${strategy.id}: ${chunks.size}")
             }
         }
 
         if (result.chunks.isEmpty()) {
-            add("Р§Р°РЅРєРё РЅРµ СЃС„РѕСЂРјРёСЂРѕРІР°РЅС‹.")
+            add("Чанки не сформированы.")
         } else {
-            add("РџРµСЂРІС‹Рµ С‡Р°РЅРєРё:")
+            add("Первые чанки:")
             result.chunks.take(12).forEach { chunk ->
                 add("  - ${chunk.metadata.chunkId}")
                 add("    strategy = ${chunk.strategy.id}")
@@ -237,7 +234,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         }
 
         if (result.embeddings.isEmpty()) {
-            add("Preview embeddings РЅРµ РїРѕР»СѓС‡РµРЅС‹.")
+            add("Preview embeddings не получены.")
         } else {
             add("Preview embeddings:")
             result.embeddings.forEach { embedding ->
@@ -254,28 +251,28 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
     }
 
     private fun documentLoadText(result: DocumentLoadResult): String = buildList {
-        add("РљРѕРјР°РЅРґР° `${result.commandName}` РІС‹РїРѕР»РЅРёР»Р° Р·Р°РіСЂСѓР·РєСѓ РґРѕРєСѓРјРµРЅС‚РѕРІ.")
+        add("Команда `${result.commandName}` выполнила загрузку документов.")
         add("")
-        add("РџР°СЂР°РјРµС‚СЂС‹ Р·Р°РїСѓСЃРєР°:")
+        add("Параметры запуска:")
         add("  inputDir = ${result.inputDir}")
         add("  strategy = ${result.strategyLabel}")
         add("  outputDir = ${result.outputDir}")
         add("")
-        add("РќР°Р№РґРµРЅРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ: ${result.documents.size}")
+        add("Найдено документов: ${result.documents.size}")
     }.joinToString(separator = System.lineSeparator())
 
     private fun retrievalSummaryLines(
-        retrievalResult: RetrievalPipelineResult? ,
-        matches: List<ru.compadre.indexer.search.model.SearchMatch>,
+        retrievalResult: RetrievalPipelineResult?,
+        matches: List<SearchMatch>,
         showAllCandidates: Boolean,
     ): List<String> = buildList {
-        add("Retrieval-СЃРІРѕРґРєР°:")
+        add("Retrieval-сводка:")
 
         if (retrievalResult == null) {
             if (matches.isEmpty()) {
-                add("  РљРѕРЅС‚РµРєСЃС‚ РЅРµ РЅР°Р№РґРµРЅ.")
+                add("  Контекст не найден.")
             } else {
-                add("  Р РµР¶РёРј pipeline РЅРµРґРѕСЃС‚СѓРїРµРЅ, РїРѕРєР°Р·Р°РЅС‹ С‚РѕР»СЊРєРѕ С„РёРЅР°Р»СЊРЅС‹Рµ СЃРѕРІРїР°РґРµРЅРёСЏ.")
+                add("  Режим pipeline недоступен, показаны только финальные совпадения.")
                 matches.forEachIndexed { index, match ->
                     addAll(
                         selectedCandidateLines(
@@ -305,12 +302,12 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         }
 
         if (retrievalResult.candidates.isEmpty()) {
-            add("  РљРѕРЅС‚РµРєСЃС‚ РЅРµ РЅР°Р№РґРµРЅ.")
+            add("  Контекст не найден.")
             return@buildList
         }
 
         if (retrievalResult.selectedCandidates.isEmpty()) {
-            add("  РџРѕСЃР»Рµ ${retrievalResult.mode.configValue} РЅРµ РѕСЃС‚Р°Р»РѕСЃСЊ РєР°РЅРґРёРґР°С‚РѕРІ.")
+            add("  После ${retrievalResult.mode.configValue} не осталось кандидатов.")
             return@buildList
         }
 
@@ -319,7 +316,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         } else {
             retrievalResult.selectedCandidates
         }
-        add(if (showAllCandidates) "  Р’СЃРµ РєР°РЅРґРёРґР°С‚С‹ pipeline:" else "  Р¤РёРЅР°Р»СЊРЅС‹Рµ РєР°РЅРґРёРґР°С‚С‹:")
+        add(if (showAllCandidates) "  Все кандидаты pipeline:" else "  Финальные кандидаты:")
         candidatesToRender.forEachIndexed { index, candidate ->
             addAll(candidateLines(index + 1, candidate, retrievalResult.mode))
         }
@@ -384,7 +381,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
 
     private fun previewText(text: String): String {
         if (text.isBlank()) {
-            return "<РїСѓСЃС‚Рѕ>"
+            return "<пусто>"
         }
 
         val singleLine = text.replace(Regex("\\s+"), " ").trim()

@@ -12,7 +12,10 @@ import ru.compadre.indexer.qa.model.RagModelCompletion
 import ru.compadre.indexer.qa.model.RagSource
 import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.search.model.SearchMatch
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
+import java.time.Instant
 
 /**
  * Question-answering service that combines retrieval context with an LLM response.
@@ -71,12 +74,36 @@ class RagQuestionAnsweringService(
         val parsedCompletion = parseModelCompletion(completion)
 
         if (parsedCompletion == null) {
+            logInvalidModelCompletion(
+                outputDir = config.app.outputDir,
+                question = question,
+                rawCompletion = completion,
+                selectedMatches = selectedMatches,
+                failureKind = "invalid_json_or_missing_required_fields",
+            )
             return RagAnswer(
                 answer = parseFailureAnswer(),
                 sources = buildSources(selectedMatches),
                 quotes = emptyList(),
                 isRefusal = true,
                 refusalReason = "llm_response_invalid_json_or_missing_required_fields",
+                retrievalResult = retrievalResult,
+            )
+        }
+
+        if (parsedCompletion.quotes.isEmpty()) {
+            logInvalidModelCompletion(
+                outputDir = config.app.outputDir,
+                question = question,
+                rawCompletion = completion,
+                selectedMatches = selectedMatches,
+                failureKind = "missing_quotes",
+            )
+            return RagAnswer(
+                answer = MISSING_QUOTES_ANSWER,
+                sources = buildSources(selectedMatches),
+                quotes = emptyList(),
+                warningMessage = MISSING_QUOTES_WARNING,
                 retrievalResult = retrievalResult,
             )
         }
@@ -158,10 +185,6 @@ class RagQuestionAnsweringService(
             }
             .take(MAX_QUOTES)
 
-        if (quotes.isEmpty()) {
-            return null
-        }
-
         return ParsedModelCompletion(
             answer = answer,
             quotes = quotes,
@@ -221,12 +244,54 @@ class RagQuestionAnsweringService(
     private fun parseFailureAnswer(): String =
         "не знаю. Уточните вопрос: модель вернула невалидный JSON или пустой обязательный ответ."
 
+    private fun logInvalidModelCompletion(
+        outputDir: String,
+        question: String,
+        rawCompletion: String,
+        selectedMatches: List<SearchMatch>,
+        failureKind: String,
+    ) {
+        val logPath = Path.of(outputDir).resolve("logs").resolve("rag-llm-format.log")
+        Files.createDirectories(logPath.parent)
+
+        val selectedChunks = if (selectedMatches.isEmpty()) {
+            "<no selected matches>"
+        } else {
+            selectedMatches.joinToString(separator = System.lineSeparator()) { match ->
+                val chunk = match.embeddedChunk.chunk
+                "chunkId=${chunk.metadata.chunkId}; score=${"%.4f".format(match.score)}; filePath=${chunk.metadata.filePath}; section=${chunk.metadata.section}"
+            }
+        }
+
+        val logEntry = buildString {
+            appendLine("timestamp = ${Instant.now()}")
+            appendLine("failureKind = $failureKind")
+            appendLine("question = $question")
+            appendLine("selectedMatches:")
+            appendLine(selectedChunks)
+            appendLine("rawCompletion:")
+            appendLine(rawCompletion)
+            appendLine("---")
+        }
+
+        Files.writeString(
+            logPath,
+            logEntry,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.APPEND,
+        )
+    }
+
     private companion object {
         private const val SYSTEM_ROLE = "system"
         private const val USER_ROLE = "user"
         private const val MAX_QUOTES = 3
         private const val REFUSAL_ANSWER =
             "не знаю. Уточните вопрос: в найденном контексте недостаточно данных для уверенного ответа."
+        private const val MISSING_QUOTES_ANSWER =
+            "Не удалось надёжно ответить по найденному контексту."
+        private const val MISSING_QUOTES_WARNING =
+            "Не удалось подтвердить этот ответ цитатами из найденного контекста."
         private val SYSTEM_PROMPT = """
             You are a retrieval-grounded assistant.
             Return exactly one JSON object and nothing else.
