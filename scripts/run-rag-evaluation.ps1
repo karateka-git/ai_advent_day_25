@@ -96,43 +96,157 @@ function Normalize-CommandOutput {
     param([string]$Text)
 
     $normalized = $Text -replace "`r", ""
-    $normalized = [regex]::Replace(
-        $normalized,
-        "\u041E\u0442\u0432\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0438\.{0,3}",
-        ""
-    )
-    $normalized = [regex]::Replace($normalized, "^\s*$[\n]?", "", [System.Text.RegularExpressions.RegexOptions]::Multiline)
+    $normalized = [regex]::Replace($normalized, "(?m)^Ответ модели.*$", "")
     return $normalized.Trim()
+}
+
+function Get-BlockContent {
+    param(
+        [string]$Text,
+        [string]$Header,
+        [string[]]$StopHeaders = @()
+    )
+
+    $normalized = Normalize-CommandOutput -Text $Text
+    $lines = $normalized -split "`n"
+    $startIndex = -1
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim() -eq "${Header}:") {
+            $startIndex = $i + 1
+            break
+        }
+    }
+
+    if ($startIndex -lt 0) {
+        return ""
+    }
+
+    $buffer = New-Object System.Collections.Generic.List[string]
+    for ($i = $startIndex; $i -lt $lines.Count; $i++) {
+        $trimmed = $lines[$i].Trim()
+        if ($StopHeaders -and $StopHeaders.Count -gt 0) {
+            $shouldStop = $false
+            foreach ($stopHeader in $StopHeaders) {
+                if ($trimmed -eq "${stopHeader}:") {
+                    $shouldStop = $true
+                    break
+                }
+            }
+            if ($shouldStop) {
+                break
+            }
+        }
+
+        [void]$buffer.Add($lines[$i])
+    }
+
+    return ([string]::Join("`n", $buffer)).Trim()
+}
+
+function Remove-AnswerMetadata {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $skipMetadata = $true
+    foreach ($line in ($Text -split "\n")) {
+        $trimmed = $line.Trim()
+        if ($skipMetadata -and (
+            $trimmed -eq "" -or
+            $trimmed -match "^Команда\s+`?ask`?\s+получила\s+ответ\s+модели\.?$" -or
+            $trimmed -match "^Параметры запуска:?" -or
+            $trimmed -match "^mode\s*=" -or
+            $trimmed -match "^query\s*=" -or
+            $trimmed -match "^strategy\s*=" -or
+            $trimmed -match "^topK\s*=" -or
+            $trimmed -match "^database\s*=" -or
+            $trimmed -eq "Ответ:" -or
+            $trimmed -eq "Retrieval-сводка:" -or
+            $trimmed -eq "Источники:" -or
+            $trimmed -eq "Цитаты:" -or
+            $trimmed -match "^(Режим|Mode|Причина|Reason)\s*:"
+        )) {
+            continue
+        }
+
+        $skipMetadata = $false
+        $lines.Add($line)
+    }
+
+    return ([string]::Join("`n", $lines)).Trim()
 }
 
 function Extract-AnswerBody {
     param([string]$Output)
 
-    $normalized = Normalize-CommandOutput -Text $Output
-    $match = [regex]::Match(
-        $normalized,
-        "(?s)\u041E\u0442\u0432\u0435\u0442:\s*(.*?)(?:\n\s*Retrieval-\u0441\u0432\u043E\u0434\u043A\u0430:|$)"
-    )
-    if ($match.Success) {
-        return $match.Groups[1].Value.Trim()
+    $body = Get-BlockContent -Text $Output -Header "Ответ" -StopHeaders @("Источники", "Цитаты", "Retrieval-сводка")
+    if ([string]::IsNullOrWhiteSpace($body)) {
+        return (Normalize-CommandOutput -Text $Output)
     }
 
-    return $normalized.Trim()
+    $answer = Remove-AnswerMetadata -Text $body
+    if ([string]::IsNullOrWhiteSpace($answer)) {
+        return $body.Trim()
+    }
+
+    return $answer
+}
+
+function Extract-SourcesBlock {
+    param([string]$Output)
+
+    return Get-BlockContent -Text $Output -Header "Источники" -StopHeaders @("Цитаты", "Retrieval-сводка")
+}
+
+function Extract-QuotesBlock {
+    param([string]$Output)
+
+    return Get-BlockContent -Text $Output -Header "Цитаты" -StopHeaders @("Retrieval-сводка")
 }
 
 function Extract-RetrievalBody {
     param([string]$Output)
 
-    $normalized = Normalize-CommandOutput -Text $Output
-    $match = [regex]::Match(
-        $normalized,
-        "(?s)Retrieval-\u0441\u0432\u043E\u0434\u043A\u0430:\s*(.*)$"
-    )
-    if ($match.Success) {
-        return $match.Groups[1].Value.Trim()
+    $body = Get-BlockContent -Text $Output -Header "Retrieval-сводка"
+    if (-not [string]::IsNullOrWhiteSpace($body)) {
+        return $body
     }
 
-    return ""
+    return Get-BlockContent -Text $Output -Header "Retrieval"
+}
+
+function Get-StructuredEntryCount {
+    param(
+        [string]$Block,
+        [string]$Pattern
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Block)) {
+        return 0
+    }
+
+    return [regex]::Matches($Block, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Multiline).Count
+}
+
+function Get-QuoteTextsFromBlock {
+    param([string]$QuotesBlock)
+
+    if ([string]::IsNullOrWhiteSpace($QuotesBlock)) {
+        return ""
+    }
+
+    $texts = New-Object System.Collections.Generic.List[string]
+    foreach ($line in ($QuotesBlock -split "\n")) {
+        if ($line -match "^\s*quote\s*=\s*(.+)$") {
+            $texts.Add($matches[1].Trim())
+        }
+    }
+
+    return [string]::Join(" ", $texts).Trim()
 }
 
 function Get-NormalizedTerms {
@@ -187,7 +301,7 @@ function Test-AnswerLooksLikeRefusal {
 
     return [regex]::IsMatch(
         $Answer,
-        "(?i)(\u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D)|(\u0434\u0430\u043D\u043D\u044B\u0445 \u043D\u0435\u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E)|(\u043D\u0435\u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u0434\u0430\u043D\u043D\u044B\u0445)|(\u043D\u0435 \u043C\u043E\u0433\u0443 \u043E\u0442\u0432\u0435\u0442\u0438\u0442\u044C)|(\u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043D\u0430\u0439\u0442\u0438)"
+        "(?i)(\bне знаю\b)|(\bне могу ответить\b)|(контекст не найден)|(данных недостаточно)|(недостаточно данных)|(не удалось найти)|(уточните вопрос)"
     )
 }
 
@@ -212,6 +326,45 @@ function Get-AnswerCoverageRatio {
     return ($intersectionCount / [double]$ExpectationTerms.Count)
 }
 
+function Get-QuoteAlignmentScore {
+    param(
+        [string]$Answer,
+        [string]$QuotesBlock
+    )
+
+    $quoteTexts = Get-QuoteTextsFromBlock -QuotesBlock $QuotesBlock
+    if ([string]::IsNullOrWhiteSpace($quoteTexts)) {
+        return 0.0
+    }
+
+    $answerTerms = Get-NormalizedTerms -Text $Answer
+    $quoteTerms = Get-NormalizedTerms -Text $quoteTexts
+    if ($answerTerms.Count -eq 0 -or $quoteTerms.Count -eq 0) {
+        return 0.0
+    }
+
+    $intersectionCount = 0
+    foreach ($term in $quoteTerms) {
+        if ($answerTerms.Contains($term)) {
+            $intersectionCount++
+        }
+    }
+
+    return ($intersectionCount / [double]$quoteTerms.Count)
+}
+
+function Get-SourceEntryCount {
+    param([string]$SourcesBlock)
+
+    return Get-StructuredEntryCount -Block $SourcesBlock -Pattern "^\s*\d+\.\s+source\s*="
+}
+
+function Get-QuoteEntryCount {
+    param([string]$QuotesBlock)
+
+    return Get-StructuredEntryCount -Block $QuotesBlock -Pattern "^\s*\d+\.\s+chunkId\s*="
+}
+
 function Test-HasExpectedSource {
     param(
         [System.Collections.Generic.List[string]]$RetrievalFilePaths,
@@ -233,6 +386,8 @@ function Evaluate-RunResult {
     param(
         [string]$ModeId,
         [string]$Answer,
+        [string]$SourcesBlock,
+        [string]$QuotesBlock,
         [string]$RetrievalBody,
         [string[]]$ExpectedSources,
         [System.Collections.Generic.HashSet[string]]$ExpectationTerms
@@ -241,24 +396,50 @@ function Evaluate-RunResult {
     $retrievalFilePaths = Get-FilePathsFromRetrieval -RetrievalBody $RetrievalBody
     $hasExpectedSource = Test-HasExpectedSource -RetrievalFilePaths $retrievalFilePaths -ExpectedSources $ExpectedSources
     $coverageRatio = Get-AnswerCoverageRatio -ExpectationTerms $ExpectationTerms -Answer $Answer
+    $sourceCount = Get-SourceEntryCount -SourcesBlock $SourcesBlock
+    $quoteCount = Get-QuoteEntryCount -QuotesBlock $QuotesBlock
+    $hasSourcesBlock = $sourceCount -gt 0
+    $hasQuotesBlock = $quoteCount -gt 0
+    $quoteAlignmentScore = Get-QuoteAlignmentScore -Answer $Answer -QuotesBlock $QuotesBlock
     $looksLikeRefusal = Test-AnswerLooksLikeRefusal -Answer $Answer
+    $refusalIsReasonable = $looksLikeRefusal -and -not $hasExpectedSource
 
     $score = 0
     if ($hasExpectedSource) {
         $score += 2
-    }
-    if ($coverageRatio -ge 0.45) {
-        $score += 2
-    } elseif ($coverageRatio -ge 0.20) {
-        $score += 1
-    }
-    if ($looksLikeRefusal) {
+    } else {
         $score -= 1
     }
+    if ($hasSourcesBlock) {
+        $score += 2
+    } else {
+        $score -= 1
+    }
+    if ($hasQuotesBlock) {
+        $score += 2
+    } else {
+        $score -= 1
+    }
+    if ($quoteAlignmentScore -ge 0.45) {
+        $score += 2
+    } elseif ($quoteAlignmentScore -ge 0.20) {
+        $score += 1
+    } else {
+        $score -= 1
+    }
+    if ($looksLikeRefusal) {
+        if ($refusalIsReasonable) {
+            $score += 1
+        } else {
+            $score -= 1
+        }
+    }
 
-    $verdict = if ($hasExpectedSource -and $coverageRatio -ge 0.35 -and -not $looksLikeRefusal) {
+    $verdict = if ($hasExpectedSource -and $hasSourcesBlock -and $hasQuotesBlock -and $quoteAlignmentScore -ge 0.25 -and -not $looksLikeRefusal) {
         "success"
-    } elseif (($hasExpectedSource -and $coverageRatio -ge 0.15) -or ($coverageRatio -ge 0.30)) {
+    } elseif ($refusalIsReasonable -and -not $hasSourcesBlock -and -not $hasQuotesBlock) {
+        "partial"
+    } elseif ($hasExpectedSource -or $hasSourcesBlock -or $hasQuotesBlock -or $quoteAlignmentScore -ge 0.15) {
         "partial"
     } else {
         "fail"
@@ -270,9 +451,18 @@ function Evaluate-RunResult {
     } else {
         $noteParts.Add("expected source missing in retrieval")
     }
+    $noteParts.Add("sources block count $sourceCount")
+    $noteParts.Add("quotes block count $quoteCount")
+    $noteParts.Add(("quote alignment {0:P0}" -f $quoteAlignmentScore))
     $noteParts.Add(("answer coverage {0:P0}" -f $coverageRatio))
     if ($looksLikeRefusal) {
-        $noteParts.Add("answer looks like a grounded refusal")
+        if ($refusalIsReasonable) {
+            $noteParts.Add("answer looks like a grounded refusal")
+        } else {
+            $noteParts.Add("answer looks like an avoidable refusal")
+        }
+    } else {
+        $noteParts.Add("answer looks like a regular grounded response")
     }
 
     return [PSCustomObject]@{
@@ -281,7 +471,13 @@ function Evaluate-RunResult {
         Score = $score
         CoverageRatio = $coverageRatio
         HasExpectedSource = $hasExpectedSource
+        SourceCount = $sourceCount
+        QuoteCount = $quoteCount
+        HasSourcesBlock = $hasSourcesBlock
+        HasQuotesBlock = $hasQuotesBlock
+        QuoteAlignmentScore = $quoteAlignmentScore
         LooksLikeRefusal = $looksLikeRefusal
+        RefusalIsReasonable = $refusalIsReasonable
         Note = [string]::Join("; ", $noteParts)
         RetrievalFilePaths = $retrievalFilePaths
     }
@@ -313,15 +509,33 @@ function New-RawSection {
         $lines += "### $($run.Label)"
         $lines += "Verdict: $($run.Evaluation.Verdict) | Score: $($run.Evaluation.Score)"
         $lines += "Note: $($run.Evaluation.Note)"
+        $lines += ("Signals: expected source={0}; sources block={1} ({2}); quotes block={3} ({4}); quote alignment={5:P0}; refusal={6}" -f `
+            $run.Evaluation.HasExpectedSource,
+            $run.Evaluation.HasSourcesBlock,
+            $run.Evaluation.SourceCount,
+            $run.Evaluation.HasQuotesBlock,
+            $run.Evaluation.QuoteCount,
+            $run.Evaluation.QuoteAlignmentScore,
+            $run.Evaluation.LooksLikeRefusal)
         $lines += ""
         $lines += "Answer:"
         $lines += '```text'
-        $lines += (($run.Answer | Out-String).Trim())
+        $lines += (($run.AnswerBody | Out-String).Trim())
+        $lines += '```'
+        $lines += ""
+        $lines += "Sources:"
+        $lines += '```text'
+        $lines += (($run.SourcesBlock | Out-String).Trim())
+        $lines += '```'
+        $lines += ""
+        $lines += "Quotes:"
+        $lines += '```text'
+        $lines += (($run.QuotesBlock | Out-String).Trim())
         $lines += '```'
         $lines += ""
         $lines += "Retrieval:"
         $lines += '```text'
-        $lines += (($run.Retrieval | Out-String).Trim())
+        $lines += (($run.RetrievalBody | Out-String).Trim())
         $lines += '```'
         $lines += ""
     }
@@ -336,10 +550,15 @@ function New-SummarySection {
         $PlainResult
     )
 
+    $modeCount = $ModeResults.Count
     $successCount = @($ModeResults | Where-Object { $_.Evaluation.Verdict -eq "success" }).Count
     $partialCount = @($ModeResults | Where-Object { $_.Evaluation.Verdict -eq "partial" }).Count
     $bestScore = (($ModeResults | ForEach-Object { $_.Evaluation.Score }) | Measure-Object -Maximum).Maximum
     $bestModes = @($ModeResults | Where-Object { $_.Evaluation.Score -eq $bestScore } | ForEach-Object { $_.Label })
+    $sourcesCount = @($ModeResults | Where-Object { $_.Evaluation.HasSourcesBlock }).Count
+    $quotesCount = @($ModeResults | Where-Object { $_.Evaluation.HasQuotesBlock }).Count
+    $alignmentCount = @($ModeResults | Where-Object { $_.Evaluation.QuoteAlignmentScore -ge 0.25 }).Count
+    $refusalCount = @($ModeResults | Where-Object { $_.Evaluation.LooksLikeRefusal }).Count
 
     $questionConclusion = if ($successCount -gt 0) {
         "There are working RAG modes; the strongest result came from: $([string]::Join(', ', $bestModes))."
@@ -361,15 +580,27 @@ function New-SummarySection {
         $lines += ('- `' + $item + '`')
     }
     $lines += ""
-    $lines += "| Mode | Verdict | Score | Note |"
-    $lines += "|---|---|---:|---|"
-    $lines += "| Plain | $($PlainResult.Evaluation.Verdict) | $($PlainResult.Evaluation.Score) | $($PlainResult.Evaluation.Note) |"
+    $lines += "| Mode | Verdict | Score | Sources | Quotes | Align | Refusal | Note |"
+    $lines += "|---|---|---:|---|---|---:|---|---|"
+    $lines += "| Plain | $($PlainResult.Evaluation.Verdict) | $($PlainResult.Evaluation.Score) | - | - | - | $($PlainResult.Evaluation.LooksLikeRefusal) | $($PlainResult.Evaluation.Note) |"
     foreach ($modeResult in $ModeResults) {
-        $lines += "| $($modeResult.Label) | $($modeResult.Evaluation.Verdict) | $($modeResult.Evaluation.Score) | $($modeResult.Evaluation.Note) |"
+        $lines += ("| {0} | {1} | {2} | {3} | {4} | {5:P0} | {6} | {7} |" -f `
+            $modeResult.Label,
+            $modeResult.Evaluation.Verdict,
+            $modeResult.Evaluation.Score,
+            $modeResult.Evaluation.HasSourcesBlock,
+            $modeResult.Evaluation.HasQuotesBlock,
+            $modeResult.Evaluation.QuoteAlignmentScore,
+            $modeResult.Evaluation.LooksLikeRefusal,
+            $modeResult.Evaluation.Note)
     }
     $lines += ""
-    $lines += "- RAG successes: $successCount/5"
-    $lines += "- RAG partials: $partialCount/5"
+    $lines += "- RAG successes: $successCount/$modeCount"
+    $lines += "- RAG partials: $partialCount/$modeCount"
+    $lines += "- RAG sources present: $sourcesCount/$modeCount"
+    $lines += "- RAG quotes present: $quotesCount/$modeCount"
+    $lines += "- Quote alignment passed: $alignmentCount/$modeCount"
+    $lines += "- Refusals: $refusalCount/$modeCount"
     $lines += "- Best modes: $([string]::Join(', ', $bestModes))"
     $lines += "- Conclusion: $questionConclusion"
     $lines += ""
@@ -410,18 +641,24 @@ foreach ($question in $questions) {
     }
 
     $plainAnswer = Extract-AnswerBody -Output $plainRun.Stdout
+    $plainSources = Extract-SourcesBlock -Output $plainRun.Stdout
+    $plainQuotes = Extract-QuotesBlock -Output $plainRun.Stdout
     $plainRetrieval = Extract-RetrievalBody -Output $plainRun.Stdout
     $plainEvaluation = Evaluate-RunResult `
         -ModeId "plain" `
         -Answer $plainAnswer `
+        -SourcesBlock $plainSources `
+        -QuotesBlock $plainQuotes `
         -RetrievalBody $plainRetrieval `
         -ExpectedSources ([string[]]$question.expectedSources) `
         -ExpectationTerms $expectationTerms
     $plainResult = [PSCustomObject]@{
         Id = "plain"
         Label = "Plain"
-        Answer = $plainAnswer
-        Retrieval = $plainRetrieval
+        AnswerBody = $plainAnswer
+        SourcesBlock = $plainSources
+        QuotesBlock = $plainQuotes
+        RetrievalBody = $plainRetrieval
         Evaluation = $plainEvaluation
     }
 
@@ -441,10 +678,14 @@ foreach ($question in $questions) {
         }
 
         $answer = Extract-AnswerBody -Output $run.Stdout
+        $sources = Extract-SourcesBlock -Output $run.Stdout
+        $quotes = Extract-QuotesBlock -Output $run.Stdout
         $retrieval = Extract-RetrievalBody -Output $run.Stdout
         $evaluation = Evaluate-RunResult `
             -ModeId $mode.Id `
             -Answer $answer `
+            -SourcesBlock $sources `
+            -QuotesBlock $quotes `
             -RetrievalBody $retrieval `
             -ExpectedSources ([string[]]$question.expectedSources) `
             -ExpectationTerms $expectationTerms
@@ -452,8 +693,10 @@ foreach ($question in $questions) {
         $modeResults.Add([PSCustomObject]@{
             Id = $mode.Id
             Label = $mode.Label
-            Answer = $answer
-            Retrieval = $retrieval
+            AnswerBody = $answer
+            SourcesBlock = $sources
+            QuotesBlock = $quotes
+            RetrievalBody = $retrieval
             Evaluation = $evaluation
         })
     }
@@ -464,7 +707,7 @@ foreach ($question in $questions) {
     }
 
     $summarySection = New-SummarySection -QuestionRecord $question -ModeResults $modeResults -PlainResult $plainResult
-    [void]$summarySections.Add([string]::Join("", @($summarySection)))
+    [void]$summarySections.Add($summarySection)
 
     $combinedResults = @($plainResult) + @($modeResults | ForEach-Object { $_ })
     $rawSection = New-RawSection `
@@ -473,7 +716,7 @@ foreach ($question in $questions) {
         -Expectation ([string[]]$question.expectation) `
         -ExpectedSources ([string[]]$question.expectedSources) `
         -RunResults $combinedResults
-    [void]$rawSections.Add([string]::Join("", @($rawSection)))
+    [void]$rawSections.Add($rawSection)
 }
 
 $summaryHeader = @(
@@ -488,9 +731,9 @@ $summaryHeader = @(
     "- post-modes = none, threshold-filter, heuristic-filter, heuristic-rerank, model-rerank",
     "",
     "Summary rubric:",
-    "- success - retrieval contains the expected source and the answer covers a meaningful part of expected facts",
-    "- partial - the answer has some useful overlap, but not enough for a confident success",
-    "- fail - retrieval does not provide reliable support and/or the answer drifts away from expected content",
+    "- success - the answer is grounded, has sources and quotes, and the quotes overlap with the answer",
+    "- partial - some support exists, but one of the key signals is missing or weak",
+    "- fail - support is weak, the output lacks structure, or the answer drifts away from the retrieval",
     "",
     "Mode wins:",
     ("- none: {0} wins" -f $modeWinCounters["none"]),
@@ -509,7 +752,8 @@ $rawHeader = @(
     "- input = $InputDir",
     "- strategy = $Strategy",
     "- topK = $TopK",
-    "- all RAG runs use --show-all-candidates"
+    "- all RAG runs use --show-all-candidates",
+    "- raw output splits each run into answer / sources / quotes / retrieval blocks"
 ) -join "`n"
 
 $summaryReport = $summaryHeader + "`n`n" + ([string]::Join("`n`n", @($summarySections | ForEach-Object { [string]$_ })))
