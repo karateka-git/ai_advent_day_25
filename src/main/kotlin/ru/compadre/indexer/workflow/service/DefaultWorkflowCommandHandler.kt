@@ -61,7 +61,7 @@ class DefaultWorkflowCommandHandler(
         is SearchCommand -> runSearch(
             query = command.query,
             strategy = command.strategy,
-            topK = command.topK ?: config.search.topK,
+            topK = command.topK,
             config = config,
         )
 
@@ -243,7 +243,8 @@ class DefaultWorkflowCommandHandler(
 
             "rag" -> {
                 val strategy = command.strategy ?: ChunkingStrategy.FIXED
-                val topK = command.topK ?: config.search.topK
+                val finalTopK = command.topK ?: config.search.finalTopK
+                val initialTopK = maxOf(config.search.initialTopK, finalTopK)
                 val databasePath = resolveDatabasePath(
                     outputDir = config.app.outputDir,
                     strategy = strategy,
@@ -253,7 +254,8 @@ class DefaultWorkflowCommandHandler(
                     question = command.query,
                     databasePath = databasePath,
                     strategy = strategy,
-                    topK = topK,
+                    initialTopK = initialTopK,
+                    finalTopK = finalTopK,
                     config = config,
                 )
 
@@ -262,7 +264,7 @@ class DefaultWorkflowCommandHandler(
                     mode = "rag",
                     answer = ragAnswer.answer,
                     strategyLabel = strategy.id,
-                    topK = topK,
+                    topK = finalTopK,
                     databasePath = databasePath.toAbsolutePath().toString(),
                     matches = ragAnswer.matches,
                     retrievalResult = ragAnswer.retrievalResult,
@@ -277,10 +279,12 @@ class DefaultWorkflowCommandHandler(
     private suspend fun runSearch(
         query: String,
         strategy: ChunkingStrategy?,
-        topK: Int,
+        topK: Int?,
         config: AppConfig,
     ): SearchResult {
         val effectiveStrategy = strategy ?: ChunkingStrategy.FIXED
+        val finalTopK = topK ?: config.search.finalTopK
+        val initialTopK = maxOf(config.search.initialTopK, finalTopK)
         val databasePath = resolveDatabasePath(
             outputDir = config.app.outputDir,
             strategy = effectiveStrategy,
@@ -290,8 +294,8 @@ class DefaultWorkflowCommandHandler(
             query = query,
             databasePath = databasePath,
             strategy = effectiveStrategy,
-            initialTopK = topK,
-            finalTopK = topK,
+            initialTopK = initialTopK,
+            finalTopK = finalTopK,
             config = config,
         )
 
@@ -299,7 +303,7 @@ class DefaultWorkflowCommandHandler(
             query = query,
             strategyLabel = effectiveStrategy.id,
             databasePath = databasePath.toAbsolutePath().toString(),
-            topK = topK,
+            topK = finalTopK,
             matches = retrievalResult.selectedMatches,
             retrievalResult = retrievalResult,
         )

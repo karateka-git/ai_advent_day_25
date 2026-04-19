@@ -20,15 +20,16 @@ class RagQuestionAnsweringService(
         question: String,
         databasePath: Path,
         strategy: ChunkingStrategy,
-        topK: Int,
+        initialTopK: Int,
+        finalTopK: Int,
         config: AppConfig,
     ): RagAnswer {
         val retrievalResult = retrievalPipelineService.retrieve(
             query = question,
             databasePath = databasePath,
             strategy = strategy,
-            initialTopK = topK,
-            finalTopK = topK,
+            initialTopK = initialTopK,
+            finalTopK = finalTopK,
             config = config,
         )
         val answer = llmClient.complete(
