@@ -5,6 +5,8 @@ package ru.compadre.indexer.search.model
  */
 data class RetrievalCandidate(
     val match: SearchMatch,
+    val initialRank: Int,
+    val finalRank: Int? = null,
     val cosineScore: Double,
     val finalScore: Double,
     val heuristicScore: Double? = null,

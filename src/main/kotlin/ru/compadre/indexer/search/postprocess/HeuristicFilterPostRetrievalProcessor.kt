@@ -21,7 +21,7 @@ class HeuristicFilterPostRetrievalProcessor : PostRetrievalProcessor {
         val selectedTextTerms = mutableListOf<Set<String>>()
         val selectedMatches = mutableSetOf<SearchMatch>()
 
-        val candidates = matches.map { match ->
+        val candidates = matches.mapIndexed { index, match ->
             val chunk = match.embeddedChunk.chunk
             val signals = HeuristicTextSignalExtractor.extract(
                 query = request.query,
@@ -53,6 +53,8 @@ class HeuristicFilterPostRetrievalProcessor : PostRetrievalProcessor {
 
             RetrievalCandidate(
                 match = match,
+                initialRank = index + 1,
+                finalRank = if (selected) selectedMatches.size else null,
                 cosineScore = match.score,
                 finalScore = heuristicScore,
                 heuristicScore = heuristicScore,

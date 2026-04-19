@@ -19,6 +19,8 @@ class NoOpPostRetrievalProcessor : PostRetrievalProcessor {
         val candidates = matches.mapIndexed { index, match ->
             RetrievalCandidate(
                 match = match,
+                initialRank = index + 1,
+                finalRank = index + 1,
                 cosineScore = match.score,
                 finalScore = match.score,
                 selected = index < request.finalTopK,

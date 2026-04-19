@@ -20,7 +20,8 @@ class ThresholdPostRetrievalProcessor : PostRetrievalProcessor {
         val filteredMatches = matches.filter { match -> match.score >= minimumSimilarity }
         val selectedMatches = filteredMatches.take(request.finalTopK)
 
-        val candidates = matches.map { match ->
+        val selectedMatchRanks = selectedMatches.withIndex().associate { (index, match) -> match to (index + 1) }
+        val candidates = matches.mapIndexed { index, match ->
             val decisionReason = when {
                 match.score < minimumSimilarity -> ThresholdFilterReason.BELOW_MIN_SIMILARITY
                 match !in selectedMatches -> ThresholdFilterReason.TRIMMED_BY_FINAL_TOP_K
@@ -29,6 +30,8 @@ class ThresholdPostRetrievalProcessor : PostRetrievalProcessor {
 
             RetrievalCandidate(
                 match = match,
+                initialRank = index + 1,
+                finalRank = selectedMatchRanks[match],
                 cosineScore = match.score,
                 finalScore = match.score,
                 decisionReason = decisionReason,

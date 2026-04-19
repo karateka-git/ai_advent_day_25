@@ -13,13 +13,22 @@ data class RetrievalPipelineResult(
      * Кандидаты в исходном порядке после vector search.
      */
     val initialCandidates: List<RetrievalCandidate>
-        get() = candidates
+        get() = candidates.sortedBy { candidate -> candidate.initialRank }
+
+    /**
+     * Кандидаты в порядке после post-processing.
+     */
+    val finalCandidates: List<RetrievalCandidate>
+        get() = candidates.sortedWith(
+            compareBy<RetrievalCandidate> { candidate -> candidate.finalRank ?: Int.MAX_VALUE }
+                .thenBy { candidate -> candidate.initialRank },
+        )
 
     /**
      * Кандидаты, выбранные для финального контекста.
      */
     val selectedCandidates: List<RetrievalCandidate>
-        get() = candidates.filter { candidate -> candidate.selected }
+        get() = finalCandidates.filter { candidate -> candidate.selected }
 
     /**
      * Финальные матчи в формате, ожидаемом текущим RAG prompt.
@@ -27,4 +36,3 @@ data class RetrievalPipelineResult(
     val selectedMatches: List<SearchMatch>
         get() = selectedCandidates.map { candidate -> candidate.match }
 }
-
