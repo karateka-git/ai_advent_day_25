@@ -3,6 +3,7 @@ package ru.compadre.indexer.workflow.result
 import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.model.RawDocument
 import ru.compadre.indexer.report.ChunkingComparisonReport
+import ru.compadre.indexer.search.model.RetrievalPipelineResult
 import ru.compadre.indexer.search.model.SearchMatch
 
 /**
@@ -70,6 +71,7 @@ data class AskResult(
     val topK: Int? = null,
     val databasePath: String? = null,
     val matches: List<SearchMatch> = emptyList(),
+    val retrievalResult: RetrievalPipelineResult? = null,
 ) : CommandResult
 
 /**
@@ -81,6 +83,7 @@ data class SearchResult(
     val databasePath: String,
     val topK: Int,
     val matches: List<SearchMatch>,
+    val retrievalResult: RetrievalPipelineResult? = null,
 ) : CommandResult
 
 /**

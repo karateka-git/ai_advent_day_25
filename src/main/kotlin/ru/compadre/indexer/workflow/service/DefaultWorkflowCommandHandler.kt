@@ -14,6 +14,7 @@ import ru.compadre.indexer.report.MarkdownComparisonReportWriter
 import ru.compadre.indexer.qa.PlainQuestionAnsweringService
 import ru.compadre.indexer.qa.RagQuestionAnsweringService
 import ru.compadre.indexer.search.BruteForceSearchEngine
+import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.storage.IndexStore
 import ru.compadre.indexer.storage.SqliteIndexStore
 import ru.compadre.indexer.workflow.command.AskCommand
@@ -42,7 +43,8 @@ class DefaultWorkflowCommandHandler(
     private val comparisonReportWriter: MarkdownComparisonReportWriter = MarkdownComparisonReportWriter(),
     private val plainQuestionAnsweringService: PlainQuestionAnsweringService = PlainQuestionAnsweringService(),
     private val searchEngine: BruteForceSearchEngine = BruteForceSearchEngine(),
-    private val ragQuestionAnsweringService: RagQuestionAnsweringService = RagQuestionAnsweringService(searchEngine),
+    private val retrievalPipelineService: RetrievalPipelineService = RetrievalPipelineService(searchEngine),
+    private val ragQuestionAnsweringService: RagQuestionAnsweringService = RagQuestionAnsweringService(retrievalPipelineService),
 ) : WorkflowCommandHandler {
     override suspend fun handle(command: WorkflowCommand, config: AppConfig): CommandResult = when (command) {
         HelpCommand -> HelpResult(
@@ -263,6 +265,7 @@ class DefaultWorkflowCommandHandler(
                     topK = topK,
                     databasePath = databasePath.toAbsolutePath().toString(),
                     matches = ragAnswer.matches,
+                    retrievalResult = ragAnswer.retrievalResult,
                 )
             }
 
@@ -283,11 +286,12 @@ class DefaultWorkflowCommandHandler(
             strategy = effectiveStrategy,
             allStrategies = false,
         )
-        val matches = searchEngine.search(
+        val retrievalResult = retrievalPipelineService.retrieve(
             query = query,
             databasePath = databasePath,
             strategy = effectiveStrategy,
-            topK = topK,
+            initialTopK = topK,
+            finalTopK = topK,
             config = config,
         )
 
@@ -296,7 +300,8 @@ class DefaultWorkflowCommandHandler(
             strategyLabel = effectiveStrategy.id,
             databasePath = databasePath.toAbsolutePath().toString(),
             topK = topK,
-            matches = matches,
+            matches = retrievalResult.selectedMatches,
+            retrievalResult = retrievalResult,
         )
     }
 

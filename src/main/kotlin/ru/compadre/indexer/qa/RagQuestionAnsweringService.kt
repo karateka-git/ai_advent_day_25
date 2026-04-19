@@ -5,7 +5,7 @@ import ru.compadre.indexer.llm.ExternalLlmClient
 import ru.compadre.indexer.llm.model.ChatMessage
 import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.qa.model.RagAnswer
-import ru.compadre.indexer.search.SearchEngine
+import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.search.model.SearchMatch
 import java.nio.file.Path
 
@@ -13,7 +13,7 @@ import java.nio.file.Path
  * Сервис вопрос-ответа с retrieval-контекстом из локального индекса.
  */
 class RagQuestionAnsweringService(
-    private val searchEngine: SearchEngine,
+    private val retrievalPipelineService: RetrievalPipelineService,
     private val llmClient: ExternalLlmClient = ExternalLlmClient(),
 ) {
     suspend fun answer(
@@ -23,11 +23,12 @@ class RagQuestionAnsweringService(
         topK: Int,
         config: AppConfig,
     ): RagAnswer {
-        val matches = searchEngine.search(
+        val retrievalResult = retrievalPipelineService.retrieve(
             query = question,
             databasePath = databasePath,
             strategy = strategy,
-            topK = topK,
+            initialTopK = topK,
+            finalTopK = topK,
             config = config,
         )
         val answer = llmClient.complete(
@@ -39,14 +40,14 @@ class RagQuestionAnsweringService(
                 ),
                 ChatMessage(
                     role = USER_ROLE,
-                    content = buildUserPrompt(question, matches),
+                    content = buildUserPrompt(question, retrievalResult.selectedMatches),
                 ),
             ),
         )
 
         return RagAnswer(
             answer = answer,
-            matches = matches,
+            retrievalResult = retrievalResult,
         )
     }
 
