@@ -59,6 +59,8 @@ enum class ModelRerankReason(
     override val label: String,
 ) : RetrievalDecisionReason {
     RANKED_BY_MODEL_SCORE("переупорядочен по model score"),
+    FALLBACK_TO_COSINE_SCORE("использован fallback на cosine score"),
+    TRIMMED_BY_FINAL_TOP_K("не попал в финальный top-K после model rerank"),
     BELOW_MODEL_SCORE_THRESHOLD("ниже порога model score"),
     ;
 
