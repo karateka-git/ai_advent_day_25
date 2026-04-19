@@ -29,7 +29,7 @@ class HeuristicFilterPostRetrievalProcessor : PostRetrievalProcessor {
                 title = chunk.metadata.title,
                 section = chunk.metadata.section,
             )
-            val heuristicScore = buildHeuristicScore(
+            val heuristicScore = HeuristicScoreCalculator.calculate(
                 cosineScore = match.score,
                 signals = signals,
                 config = config,
@@ -69,28 +69,5 @@ class HeuristicFilterPostRetrievalProcessor : PostRetrievalProcessor {
             finalTopK = request.finalTopK,
             candidates = candidates,
         )
-    }
-
-    private fun buildHeuristicScore(
-        cosineScore: Double,
-        signals: HeuristicTextSignals,
-        config: AppConfig,
-    ): Double {
-        val heuristicConfig = config.search.heuristic
-        var score =
-            cosineScore * heuristicConfig.cosineWeight +
-                signals.overlapRatio * heuristicConfig.keywordOverlapWeight
-
-        if (signals.hasTextMatch) {
-            score += heuristicConfig.exactMatchBonus
-        }
-        if (signals.hasTitleMatch) {
-            score += heuristicConfig.titleMatchBonus
-        }
-        if (signals.hasSectionMatch) {
-            score += heuristicConfig.sectionMatchBonus
-        }
-
-        return score
     }
 }

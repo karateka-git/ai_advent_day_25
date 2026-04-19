@@ -42,9 +42,11 @@ enum class HeuristicFilterReason(
 enum class HeuristicRerankReason(
     override val label: String,
 ) : RetrievalDecisionReason {
+    RANKED_BY_HEURISTIC_SCORE("переупорядочен по heuristic score"),
     BOOSTED_BY_EXACT_MATCH("поднят из-за точного совпадения"),
     BOOSTED_BY_TITLE_MATCH("поднят из-за совпадения с заголовком"),
     DEMOTED_BY_WEAK_OVERLAP("понижен из-за слабого lexical overlap"),
+    TRIMMED_BY_FINAL_TOP_K("не попал в финальный top-K после rerank"),
     ;
 
     override val mode: PostRetrievalMode = PostRetrievalMode.HEURISTIC_RERANK
