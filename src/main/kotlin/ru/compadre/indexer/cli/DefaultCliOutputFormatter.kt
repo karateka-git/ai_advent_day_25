@@ -249,7 +249,10 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
             add("     finalScore = ${"%.4f".format(candidate.finalScore)}")
             candidate.heuristicScore?.let { add("     heuristicScore = ${"%.4f".format(it)}") }
             candidate.modelScore?.let { add("     modelScore = ${"%.4f".format(it)}") }
-            candidate.filterReason?.let { add("     filterReason = $it") }
+            candidate.decisionReason?.let { reason ->
+                add("     decisionMode = ${reason.mode.configValue}")
+                add("     decisionReason = ${reason.label}")
+            }
             add("     chunkId = ${chunk.metadata.chunkId}")
             add("     title = ${chunk.metadata.title}")
             add("     filePath = ${chunk.metadata.filePath}")

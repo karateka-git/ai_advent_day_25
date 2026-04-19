@@ -9,6 +9,6 @@ data class RetrievalCandidate(
     val finalScore: Double,
     val heuristicScore: Double? = null,
     val modelScore: Double? = null,
-    val filterReason: String? = null,
+    val decisionReason: RetrievalDecisionReason? = null,
     val selected: Boolean = false,
 )
