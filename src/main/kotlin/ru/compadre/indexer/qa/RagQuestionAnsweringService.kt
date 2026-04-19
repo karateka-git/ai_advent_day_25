@@ -1,5 +1,6 @@
 package ru.compadre.indexer.qa
 
+import kotlinx.serialization.json.Json
 import ru.compadre.indexer.config.AnswerGuardSection
 import ru.compadre.indexer.config.AppConfig
 import ru.compadre.indexer.llm.ExternalLlmClient
@@ -7,6 +8,7 @@ import ru.compadre.indexer.llm.model.ChatMessage
 import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.qa.model.RagAnswer
 import ru.compadre.indexer.qa.model.RagQuote
+import ru.compadre.indexer.qa.model.RagModelCompletion
 import ru.compadre.indexer.qa.model.RagSource
 import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.search.model.SearchMatch
@@ -18,6 +20,10 @@ import java.nio.file.Path
 class RagQuestionAnsweringService(
     private val retrievalPipelineService: RetrievalPipelineService,
     private val llmClient: ExternalLlmClient = ExternalLlmClient(),
+    private val json: Json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    },
 ) {
     suspend fun answer(
         question: String,
@@ -49,7 +55,7 @@ class RagQuestionAnsweringService(
             )
         }
 
-        val answer = llmClient.complete(
+        val completion = llmClient.complete(
             config = config.llm,
             messages = listOf(
                 ChatMessage(
@@ -62,11 +68,23 @@ class RagQuestionAnsweringService(
                 ),
             ),
         )
+        val parsedCompletion = parseModelCompletion(completion)
+
+        if (parsedCompletion == null) {
+            return RagAnswer(
+                answer = parseFailureAnswer(),
+                sources = buildSources(selectedMatches),
+                quotes = emptyList(),
+                isRefusal = true,
+                refusalReason = "llm_response_invalid_json_or_missing_required_fields",
+                retrievalResult = retrievalResult,
+            )
+        }
 
         return RagAnswer(
-            answer = answer,
+            answer = parsedCompletion.answer,
             sources = buildSources(selectedMatches),
-            quotes = buildQuotes(selectedMatches),
+            quotes = parsedCompletion.quotes,
             retrievalResult = retrievalResult,
         )
     }
@@ -111,37 +129,77 @@ class RagQuestionAnsweringService(
         }.distinctBy { source -> source.chunkId }
 
     /**
-     * Quotes are short fragments from retrieved chunks, trimmed for CLI output.
+     * Parse the model response into a structured answer payload.
      */
-    private fun buildQuotes(matches: List<SearchMatch>): List<RagQuote> =
-        matches.mapNotNull { match ->
-            val chunk = match.embeddedChunk.chunk
-            val quote = chunk.text
-                .replace(Regex("\\s+"), " ")
-                .trim()
-                .take(MAX_QUOTE_LENGTH)
+    private fun parseModelCompletion(rawCompletion: String): ParsedModelCompletion? {
+        val jsonPayload = extractJsonPayload(rawCompletion)
+        val payload = runCatching {
+            json.decodeFromString<RagModelCompletion>(jsonPayload)
+        }.getOrNull() ?: return null
 
-            if (quote.isBlank()) {
-                null
-            } else {
-                RagQuote(
-                    chunkId = chunk.metadata.chunkId,
-                    quote = quote,
-                )
+        val answer = payload.answer?.trim().orEmpty()
+        if (answer.isBlank()) {
+            return null
+        }
+
+        val quotes = payload.quotes
+            .mapNotNull { quote ->
+                val chunkId = quote.chunkId?.trim().orEmpty()
+                val text = quote.quote?.trim().orEmpty().ifBlank { quote.text?.trim().orEmpty() }
+
+                if (chunkId.isBlank() || text.isBlank()) {
+                    null
+                } else {
+                    RagQuote(
+                        chunkId = chunkId,
+                        quote = text,
+                    )
+                }
             }
-        }.distinctBy { quote -> quote.chunkId to quote.quote }
+            .take(MAX_QUOTES)
+
+        if (quotes.isEmpty()) {
+            return null
+        }
+
+        return ParsedModelCompletion(
+            answer = answer,
+            quotes = quotes,
+        )
+    }
+
+    private fun extractJsonPayload(rawCompletion: String): String {
+        val trimmed = rawCompletion.trim()
+        if (!trimmed.startsWith("```")) {
+            return trimmed
+        }
+
+        val lines = trimmed.lines()
+        val startIndex = lines.indexOfFirst { it.trim().startsWith("```") }
+        val endIndex = lines.indexOfLast { it.trim() == "```" }
+        if (startIndex >= 0 && endIndex > startIndex) {
+            return lines.subList(startIndex + 1, endIndex).joinToString(separator = "\n").trim()
+        }
+
+        return trimmed
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+    }
 
     private fun buildUserPrompt(
         question: String,
         matches: List<SearchMatch>,
     ): String {
         val contextBlock = if (matches.isEmpty()) {
-            "Контекст не найден."
+            "No retrieval context was found."
         } else {
             matches.mapIndexed { index, match ->
                 val chunk = match.embeddedChunk.chunk
                 buildString {
-                    appendLine("Источник ${index + 1}:")
+                    appendLine("Chunk ${index + 1}:")
+                    appendLine("chunkId = ${chunk.metadata.chunkId}")
                     appendLine("score = ${"%.4f".format(match.score)}")
                     appendLine("title = ${chunk.metadata.title}")
                     appendLine("filePath = ${chunk.metadata.filePath}")
@@ -152,26 +210,53 @@ class RagQuestionAnsweringService(
         }
 
         return buildString {
-            appendLine("Контекст:")
+            appendLine("Context:")
             appendLine(contextBlock)
             appendLine()
-            appendLine("Вопрос:")
+            appendLine("Question:")
             appendLine(question)
         }.trimEnd()
     }
 
+    private fun parseFailureAnswer(): String =
+        "не знаю. Уточните вопрос: модель вернула невалидный JSON или пустой обязательный ответ."
+
     private companion object {
         private const val SYSTEM_ROLE = "system"
         private const val USER_ROLE = "user"
-        private const val MAX_QUOTE_LENGTH = 180
+        private const val MAX_QUOTES = 3
         private const val REFUSAL_ANSWER =
             "не знаю. Уточните вопрос: в найденном контексте недостаточно данных для уверенного ответа."
-        private const val SYSTEM_PROMPT =
-            "Ты полезный ассистент. Отвечай по контексту из retrieval. Если данных недостаточно, прямо скажи об этом. Не выдумывай факты вне контекста."
+        private val SYSTEM_PROMPT = """
+            You are a retrieval-grounded assistant.
+            Return exactly one JSON object and nothing else.
+
+            Required schema:
+            {
+              "answer": "string",
+              "quotes": [
+                { "chunkId": "string", "quote": "string" }
+              ]
+            }
+
+            Rules:
+            - Use 1 to 3 quotes.
+            - Each quote must be a direct excerpt from the provided context.
+            - Every quote must reference an existing chunkId from the context.
+            - Keep quotes short and relevant.
+            - Answer in the same language as the question.
+            - Do not add markdown, code fences, explanations, or extra keys.
+            - If the context is insufficient, set answer to a refusal like "не знаю. Уточните вопрос: ..." and leave quotes empty.
+        """.trimIndent()
     }
 
     private data class GuardDecision(
         val allowed: Boolean,
         val reason: String?,
+    )
+
+    private data class ParsedModelCompletion(
+        val answer: String,
+        val quotes: List<RagQuote>,
     )
 }
