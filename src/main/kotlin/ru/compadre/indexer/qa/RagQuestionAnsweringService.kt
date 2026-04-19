@@ -7,8 +7,8 @@ import ru.compadre.indexer.llm.ExternalLlmClient
 import ru.compadre.indexer.llm.model.ChatMessage
 import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.qa.model.RagAnswer
-import ru.compadre.indexer.qa.model.RagQuote
 import ru.compadre.indexer.qa.model.RagModelCompletion
+import ru.compadre.indexer.qa.model.RagQuote
 import ru.compadre.indexer.qa.model.RagSource
 import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.search.model.SearchMatch
@@ -92,6 +92,17 @@ class RagQuestionAnsweringService(
         }
 
         if (parsedCompletion.quotes.isEmpty()) {
+            if (looksLikeRefusal(parsedCompletion.answer)) {
+                return RagAnswer(
+                    answer = parsedCompletion.answer,
+                    sources = emptyList(),
+                    quotes = emptyList(),
+                    isRefusal = true,
+                    refusalReason = "llm_refusal_due_to_missing_grounding_quote",
+                    retrievalResult = retrievalResult,
+                )
+            }
+
             logInvalidModelCompletion(
                 outputDir = config.app.outputDir,
                 question = question,
@@ -215,6 +226,10 @@ class RagQuestionAnsweringService(
         question: String,
         matches: List<SearchMatch>,
     ): String {
+        val validChunkIds = matches.joinToString(separator = ", ") { match ->
+            match.embeddedChunk.chunk.metadata.chunkId
+        }.ifBlank { "<none>" }
+
         val contextBlock = if (matches.isEmpty()) {
             "No retrieval context was found."
         } else {
@@ -236,13 +251,25 @@ class RagQuestionAnsweringService(
             appendLine("Context:")
             appendLine(contextBlock)
             appendLine()
+            appendLine("Valid chunkIds:")
+            appendLine(validChunkIds)
+            appendLine()
             appendLine("Question:")
             appendLine(question)
         }.trimEnd()
     }
 
     private fun parseFailureAnswer(): String =
-        "не знаю. Уточните вопрос: модель вернула невалидный JSON или пустой обязательный ответ."
+        "Не знаю. Уточните вопрос: модель вернула невалидный JSON или пустой обязательный ответ."
+
+    private fun looksLikeRefusal(answer: String): Boolean {
+        val normalized = answer.lowercase()
+        return normalized.contains("не знаю") ||
+            normalized.contains("уточните вопрос") ||
+            normalized.contains("недостаточно данных") ||
+            normalized.contains("не могу ответить") ||
+            normalized.contains("insufficient context")
+    }
 
     private fun logInvalidModelCompletion(
         outputDir: String,
@@ -285,13 +312,13 @@ class RagQuestionAnsweringService(
     private companion object {
         private const val SYSTEM_ROLE = "system"
         private const val USER_ROLE = "user"
-        private const val MAX_QUOTES = 3
+        private const val MAX_QUOTES = 1
         private const val REFUSAL_ANSWER =
-            "не знаю. Уточните вопрос: в найденном контексте недостаточно данных для уверенного ответа."
+            "Не знаю. Уточните вопрос: в найденном контексте недостаточно данных для уверенного ответа."
         private const val MISSING_QUOTES_ANSWER =
             "Не удалось надёжно ответить по найденному контексту."
         private const val MISSING_QUOTES_WARNING =
-            "Не удалось подтвердить этот ответ цитатами из найденного контекста."
+            "Не удалось подтвердить этот ответ цитатой из найденного контекста."
         private val SYSTEM_PROMPT = """
             You are a retrieval-grounded assistant.
             Return exactly one JSON object and nothing else.
@@ -305,13 +332,13 @@ class RagQuestionAnsweringService(
             }
 
             Rules:
-            - Use 1 to 3 quotes.
-            - Each quote must be a direct excerpt from the provided context.
-            - Every quote must reference an existing chunkId from the context.
-            - Keep quotes short and relevant.
+            - For a grounded answer, return exactly one quote.
+            - The quote must be a short direct excerpt from the provided context.
+            - The quote must reference an existing chunkId from the context.
+            - Pick the single best quote that most directly supports the answer.
             - Answer in the same language as the question.
             - Do not add markdown, code fences, explanations, or extra keys.
-            - If the context is insufficient, set answer to a refusal like "не знаю. Уточните вопрос: ..." and leave quotes empty.
+            - If you cannot support the answer with one direct quote, return a refusal like "Не знаю. Уточните вопрос: ..." and leave quotes empty.
         """.trimIndent()
     }
 
