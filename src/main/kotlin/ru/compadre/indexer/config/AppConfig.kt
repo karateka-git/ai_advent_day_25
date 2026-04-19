@@ -60,7 +60,7 @@ data class SearchSection(
 )
 
 /**
- * РќР°СЃС‚СЂРѕР№РєРё rule-based РѕС†РµРЅРєРё РґР»СЏ post-retrieval СЌС‚Р°РїР°.
+ * Настройки rule-based оценки для post-retrieval этапа.
  */
 data class SearchHeuristicSection(
     val minKeywordOverlap: Int,
@@ -73,7 +73,7 @@ data class SearchHeuristicSection(
 )
 
 /**
- * РќР°СЃС‚СЂРѕР№РєРё model-based reranking.
+ * Настройки model-based reranking.
  */
 data class SearchModelRerankSection(
     val enabled: Boolean,

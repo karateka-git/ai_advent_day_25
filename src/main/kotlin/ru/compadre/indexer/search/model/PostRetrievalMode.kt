@@ -1,7 +1,7 @@
 package ru.compadre.indexer.search.model
 
 /**
- * Р РµР¶РёРј РІС‚РѕСЂРѕРіРѕ СЌС‚Р°РїР° retrieval РїРѕСЃР»Рµ Р±Р°Р·РѕРІРѕРіРѕ vector search.
+ * Режим второго этапа retrieval после базового vector search.
  */
 enum class PostRetrievalMode(val configValue: String) {
     NONE("none"),
@@ -13,7 +13,7 @@ enum class PostRetrievalMode(val configValue: String) {
 
     companion object {
         /**
-         * РџСЂРµРѕР±СЂР°Р·СѓРµС‚ СЃС‚СЂРѕРєСѓ РёР· РєРѕРЅС„РёРіР° РёР»Рё CLI РІ РїРѕРґРґРµСЂР¶РёРІР°РµРјС‹Р№ СЂРµР¶РёРј.
+         * Преобразует строку из конфига или CLI в поддерживаемый режим.
          */
         fun fromValue(rawValue: String): PostRetrievalMode? =
             entries.firstOrNull { mode -> mode.configValue.equals(rawValue.trim(), ignoreCase = true) }
