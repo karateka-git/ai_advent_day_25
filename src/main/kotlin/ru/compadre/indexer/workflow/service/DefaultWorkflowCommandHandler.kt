@@ -274,6 +274,7 @@ class DefaultWorkflowCommandHandler(
                     topK = finalTopK,
                     databasePath = databasePath.toAbsolutePath().toString(),
                     matches = ragAnswer.matches,
+                    ragAnswer = ragAnswer,
                     retrievalResult = ragAnswer.retrievalResult,
                     showAllCandidates = command.showAllCandidates,
                 )

@@ -5,12 +5,14 @@ import ru.compadre.indexer.llm.ExternalLlmClient
 import ru.compadre.indexer.llm.model.ChatMessage
 import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.qa.model.RagAnswer
+import ru.compadre.indexer.qa.model.RagQuote
+import ru.compadre.indexer.qa.model.RagSource
 import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.search.model.SearchMatch
 import java.nio.file.Path
 
 /**
- * Сервис вопрос-ответа с retrieval-контекстом из локального индекса.
+ * Question-answering service that combines retrieval context with an LLM response.
  */
 class RagQuestionAnsweringService(
     private val retrievalPipelineService: RetrievalPipelineService,
@@ -32,6 +34,7 @@ class RagQuestionAnsweringService(
             finalTopK = finalTopK,
             config = config,
         )
+        val selectedMatches = retrievalResult.selectedMatches
         val answer = llmClient.complete(
             config = config.llm,
             messages = listOf(
@@ -41,16 +44,52 @@ class RagQuestionAnsweringService(
                 ),
                 ChatMessage(
                     role = USER_ROLE,
-                    content = buildUserPrompt(question, retrievalResult.selectedMatches),
+                    content = buildUserPrompt(question, selectedMatches),
                 ),
             ),
         )
 
         return RagAnswer(
             answer = answer,
+            sources = buildSources(selectedMatches),
+            quotes = buildQuotes(selectedMatches),
             retrievalResult = retrievalResult,
         )
     }
+
+    /**
+     * Source metadata is derived directly from selected retrieval matches.
+     */
+    private fun buildSources(matches: List<SearchMatch>): List<RagSource> =
+        matches.map { match ->
+            val chunk = match.embeddedChunk.chunk
+            RagSource(
+                source = chunk.metadata.filePath,
+                section = chunk.metadata.section,
+                chunkId = chunk.metadata.chunkId,
+            )
+        }.distinctBy { source -> source.chunkId }
+
+    /**
+     * Quotes are short fragments from retrieved chunks, trimmed for CLI output.
+     */
+    private fun buildQuotes(matches: List<SearchMatch>): List<RagQuote> =
+        matches.mapNotNull { match ->
+            val chunk = match.embeddedChunk.chunk
+            val quote = chunk.text
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .take(MAX_QUOTE_LENGTH)
+
+            if (quote.isBlank()) {
+                null
+            } else {
+                RagQuote(
+                    chunkId = chunk.metadata.chunkId,
+                    quote = quote,
+                )
+            }
+        }.distinctBy { quote -> quote.chunkId to quote.quote }
 
     private fun buildUserPrompt(
         question: String,
@@ -84,6 +123,7 @@ class RagQuestionAnsweringService(
     private companion object {
         private const val SYSTEM_ROLE = "system"
         private const val USER_ROLE = "user"
+        private const val MAX_QUOTE_LENGTH = 180
         private const val SYSTEM_PROMPT =
             "Ты полезный ассистент. Отвечай по контексту из retrieval. Если данных недостаточно, прямо скажи об этом. Не выдумывай факты вне контекста."
     }

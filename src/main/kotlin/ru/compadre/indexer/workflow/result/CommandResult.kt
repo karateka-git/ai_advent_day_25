@@ -2,6 +2,7 @@ package ru.compadre.indexer.workflow.result
 
 import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.model.RawDocument
+import ru.compadre.indexer.qa.model.RagAnswer
 import ru.compadre.indexer.report.ChunkingComparisonReport
 import ru.compadre.indexer.search.model.RetrievalPipelineResult
 import ru.compadre.indexer.search.model.SearchMatch
@@ -80,6 +81,7 @@ data class AskResult(
     val topK: Int? = null,
     val databasePath: String? = null,
     val matches: List<SearchMatch> = emptyList(),
+    val ragAnswer: RagAnswer? = null,
     val retrievalResult: RetrievalPipelineResult? = null,
     val showAllCandidates: Boolean = false,
 ) : CommandResult
