@@ -22,6 +22,7 @@ import ru.compadre.indexer.workflow.command.CompareCommand
 import ru.compadre.indexer.workflow.command.HelpCommand
 import ru.compadre.indexer.workflow.command.IndexCommand
 import ru.compadre.indexer.workflow.command.SearchCommand
+import ru.compadre.indexer.workflow.command.SetPostModeCommand
 import ru.compadre.indexer.workflow.command.WorkflowCommand
 import ru.compadre.indexer.workflow.result.ChunkEmbeddingPreview
 import ru.compadre.indexer.workflow.result.ChunkPreviewResult
@@ -54,6 +55,7 @@ class DefaultWorkflowCommandHandler(
             embeddingModel = config.ollama.embeddingModel,
             fixedSize = config.chunking.fixedSize,
             overlap = config.chunking.overlap,
+            postProcessingMode = config.search.postProcessingMode,
         )
 
         is AskCommand -> runAsk(command, config)
@@ -75,6 +77,10 @@ class DefaultWorkflowCommandHandler(
         is CompareCommand -> buildCompareReport(
             inputDir = command.inputDir ?: config.app.inputDir,
             config = config,
+        )
+
+        is SetPostModeCommand -> throw IllegalArgumentException(
+            "Команда `set` должна обрабатываться на уровне CLI-сессии, а не workflow handler.",
         )
     }
 

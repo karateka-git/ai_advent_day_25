@@ -7,8 +7,13 @@ import ru.compadre.indexer.cli.DefaultCliCommandParser
 import ru.compadre.indexer.cli.DefaultCliOutputFormatter
 import ru.compadre.indexer.config.AppConfig
 import ru.compadre.indexer.config.AppConfigLoader
-import ru.compadre.indexer.workflow.command.HelpCommand
 import ru.compadre.indexer.workflow.command.AskCommand
+import ru.compadre.indexer.config.withPostProcessingMode
+import ru.compadre.indexer.workflow.command.HelpCommand
+import ru.compadre.indexer.workflow.command.SearchCommand
+import ru.compadre.indexer.workflow.command.SetPostModeCommand
+import ru.compadre.indexer.workflow.command.WorkflowCommand
+import ru.compadre.indexer.workflow.result.PostModeUpdateResult
 import ru.compadre.indexer.workflow.service.DefaultWorkflowCommandHandler
 import ru.compadre.indexer.workflow.service.WorkflowCommandHandler
 import java.io.FileDescriptor
@@ -24,7 +29,7 @@ fun main(args: Array<String>) = runBlocking {
     configureUtf8Console()
     configureLogging()
 
-    val config = AppConfigLoader.load()
+    val baseConfig = AppConfigLoader.load()
     val parser: CliCommandParser = DefaultCliCommandParser()
     val formatter: CliOutputFormatter = DefaultCliOutputFormatter()
     val commandHandler: WorkflowCommandHandler = DefaultWorkflowCommandHandler()
@@ -33,7 +38,7 @@ fun main(args: Array<String>) = runBlocking {
         runInteractiveShell(
             parser = parser,
             formatter = formatter,
-            config = config,
+            baseConfig = baseConfig,
             commandHandler = commandHandler,
         )
         return@runBlocking
@@ -46,7 +51,16 @@ fun main(args: Array<String>) = runBlocking {
         return@runBlocking
     }
 
-    println(formatter.format(executeCommandWithFeedback(command, config, commandHandler)))
+    val result = when (command) {
+        is SetPostModeCommand -> PostModeUpdateResult(
+            effectivePostMode = command.postMode ?: baseConfig.search.postProcessingMode,
+            resetToConfig = command.postMode == null,
+        )
+
+        else -> executeCommandWithFeedback(command, baseConfig, commandHandler)
+    }
+
+    println(formatter.format(result))
 }
 
 private fun configureLogging() {
@@ -74,11 +88,12 @@ private fun configureUtf8Console() {
 private suspend fun runInteractiveShell(
     parser: CliCommandParser,
     formatter: CliOutputFormatter,
-    config: AppConfig,
+    baseConfig: AppConfig,
     commandHandler: WorkflowCommandHandler,
 ) {
     println("Local Document Indexer")
     println("Интерактивный режим. Введите `help`, чтобы увидеть доступные команды, или `exit`, чтобы завершить сессию.")
+    var sessionPostModeOverride: String? = null
 
     while (true) {
         print("> ")
@@ -101,18 +116,20 @@ private suspend fun runInteractiveShell(
             }
 
             "help" -> {
-                println(formatter.format(commandHandler.handle(HelpCommand, config)))
+                val helpConfig = applySessionPostModeOverride(baseConfig, sessionPostModeOverride)
+                println(formatter.format(commandHandler.handle(HelpCommand, helpConfig)))
                 continue
             }
         }
 
-        executeInteractiveCommand(
+        sessionPostModeOverride = executeInteractiveCommand(
             rawInput = rawInput,
             parser = parser,
             formatter = formatter,
-            config = config,
+            baseConfig = baseConfig,
+            sessionPostModeOverride = sessionPostModeOverride,
             commandHandler = commandHandler,
-        )
+        ) ?: sessionPostModeOverride
     }
 }
 
@@ -120,34 +137,73 @@ private suspend fun executeInteractiveCommand(
     rawInput: String,
     parser: CliCommandParser,
     formatter: CliOutputFormatter,
-    config: AppConfig,
+    baseConfig: AppConfig,
+    sessionPostModeOverride: String?,
     commandHandler: WorkflowCommandHandler,
-) {
+): String? {
     val command = try {
         parser.parse(tokenizeCliInput(rawInput))
     } catch (error: IllegalArgumentException) {
         println(error.message ?: "Не удалось разобрать CLI-команду.")
-        return
+        return null
     }
 
-    println(formatter.format(executeCommandWithFeedback(command, config, commandHandler)))
+    return when (command) {
+        is SetPostModeCommand -> {
+            val updatedOverride = command.postMode
+            val effectivePostMode = updatedOverride ?: baseConfig.search.postProcessingMode
+            println(
+                formatter.format(
+                    PostModeUpdateResult(
+                        effectivePostMode = effectivePostMode,
+                        resetToConfig = updatedOverride == null,
+                    ),
+                ),
+            )
+            updatedOverride
+        }
+
+        else -> {
+            val effectiveConfig = applySessionPostModeOverride(baseConfig, sessionPostModeOverride)
+            println(formatter.format(executeCommandWithFeedback(command, effectiveConfig, commandHandler)))
+            sessionPostModeOverride
+        }
+    }
 }
 
 private suspend fun executeCommandWithFeedback(
-    command: ru.compadre.indexer.workflow.command.WorkflowCommand,
+    command: WorkflowCommand,
     config: AppConfig,
     commandHandler: WorkflowCommandHandler,
 ) = if (command is AskCommand) {
     val loadingIndicator = LoadingIndicator()
     try {
         loadingIndicator.start()
-        commandHandler.handle(command, config)
+        commandHandler.handle(command, applyCommandPostModeOverride(config, command))
     } finally {
         loadingIndicator.stop()
     }
+} else if (command is SearchCommand) {
+    commandHandler.handle(command, applyCommandPostModeOverride(config, command))
 } else {
     commandHandler.handle(command, config)
 }
+
+private fun applySessionPostModeOverride(
+    baseConfig: AppConfig,
+    sessionPostModeOverride: String?,
+): AppConfig =
+    sessionPostModeOverride?.let(baseConfig::withPostProcessingMode) ?: baseConfig
+
+private fun applyCommandPostModeOverride(
+    config: AppConfig,
+    command: WorkflowCommand,
+): AppConfig =
+    when (command) {
+        is AskCommand -> command.postMode?.let(config::withPostProcessingMode) ?: config
+        is SearchCommand -> command.postMode?.let(config::withPostProcessingMode) ?: config
+        else -> config
+    }
 
 private fun tokenizeCliInput(rawInput: String): Array<String> {
     val tokens = mutableListOf<String>()

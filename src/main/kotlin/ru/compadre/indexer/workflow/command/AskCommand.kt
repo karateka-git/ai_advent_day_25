@@ -10,4 +10,5 @@ data class AskCommand(
     val mode: String,
     val strategy: ChunkingStrategy? = null,
     val topK: Int? = null,
+    val postMode: String? = null,
 ) : WorkflowCommand

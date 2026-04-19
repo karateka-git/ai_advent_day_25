@@ -1,11 +1,13 @@
 package ru.compadre.indexer.cli
 
 import ru.compadre.indexer.model.ChunkingStrategy
+import ru.compadre.indexer.search.model.PostRetrievalMode
 import ru.compadre.indexer.workflow.command.AskCommand
 import ru.compadre.indexer.workflow.command.CompareCommand
 import ru.compadre.indexer.workflow.command.HelpCommand
 import ru.compadre.indexer.workflow.command.IndexCommand
 import ru.compadre.indexer.workflow.command.SearchCommand
+import ru.compadre.indexer.workflow.command.SetPostModeCommand
 import ru.compadre.indexer.workflow.command.WorkflowCommand
 
 /**
@@ -25,8 +27,9 @@ class DefaultCliCommandParser : CliCommandParser {
             "compare" -> parseCompareCommand(args)
             "ask" -> parseAskCommand(args)
             "search" -> parseSearchCommand(args)
+            "set" -> parseSetCommand(args)
             else -> throw IllegalArgumentException(
-                "Неизвестная команда `$command`. Поддерживаемые команды: help, index, compare, ask, search.",
+                "Неизвестная команда `$command`. Поддерживаемые команды: help, index, compare, ask, search, set.",
             )
         }
     }
@@ -68,6 +71,7 @@ class DefaultCliCommandParser : CliCommandParser {
                 )
         }
         val topK = findIntOption(args, "--top")
+        val postMode = findPostModeOption(args, "--post-mode")
 
         if (mode !in SUPPORTED_ASK_MODES) {
             throw IllegalArgumentException("Для `ask --mode` поддерживаются только значения `plain` и `rag`.")
@@ -86,6 +90,7 @@ class DefaultCliCommandParser : CliCommandParser {
             mode = mode,
             strategy = strategy,
             topK = topK,
+            postMode = postMode,
         )
     }
 
@@ -102,12 +107,26 @@ class DefaultCliCommandParser : CliCommandParser {
             ?: findOption(args, "--top")?.let {
                 throw IllegalArgumentException("Для `search --top` требуется целое число.")
             }
+        val postMode = findPostModeOption(args, "--post-mode")
 
         return SearchCommand(
             query = query,
             strategy = strategy,
             topK = topK,
+            postMode = postMode,
         )
+    }
+
+    private fun parseSetCommand(args: Array<String>): WorkflowCommand {
+        val postModeValue = findOption(args, "--post-mode")
+            ?: throw IllegalArgumentException("Для команды `set` требуется опция `--post-mode`.")
+
+        return if (postModeValue.equals("config", ignoreCase = true)) {
+            SetPostModeCommand(postMode = null)
+        } else {
+            val postMode = validatePostMode(postModeValue, optionName = "--post-mode")
+            SetPostModeCommand(postMode = postMode)
+        }
     }
 
     private fun findOption(args: Array<String>, optionName: String): String? {
@@ -127,8 +146,20 @@ class DefaultCliCommandParser : CliCommandParser {
             ?: throw IllegalArgumentException("Для опции `$optionName` требуется целое число.")
     }
 
+    private fun findPostModeOption(args: Array<String>, optionName: String): String? {
+        val rawValue = findOption(args, optionName) ?: return null
+        return validatePostMode(rawValue, optionName)
+    }
+
+    private fun validatePostMode(rawValue: String, optionName: String): String =
+        PostRetrievalMode.fromValue(rawValue)?.configValue
+            ?: throw IllegalArgumentException(
+                "Для `$optionName` поддерживаются значения: ${SUPPORTED_POST_MODES.joinToString()}.",
+            )
+
     private companion object {
         private const val DEFAULT_ASK_MODE = "plain"
         private val SUPPORTED_ASK_MODES = setOf("plain", "rag")
+        private val SUPPORTED_POST_MODES = PostRetrievalMode.entries.map { mode -> mode.configValue }
     }
 }

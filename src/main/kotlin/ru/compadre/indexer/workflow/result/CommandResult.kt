@@ -21,6 +21,15 @@ data class HelpResult(
     val embeddingModel: String,
     val fixedSize: Int,
     val overlap: Int,
+    val postProcessingMode: String,
+) : CommandResult
+
+/**
+ * Результат смены runtime-режима post-retrieval обработки.
+ */
+data class PostModeUpdateResult(
+    val effectivePostMode: String,
+    val resetToConfig: Boolean,
 ) : CommandResult
 
 /**

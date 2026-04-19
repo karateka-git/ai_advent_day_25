@@ -11,6 +11,7 @@ import ru.compadre.indexer.workflow.result.CommandResult
 import ru.compadre.indexer.workflow.result.DocumentLoadResult
 import ru.compadre.indexer.workflow.result.HelpResult
 import ru.compadre.indexer.workflow.result.IndexPersistResult
+import ru.compadre.indexer.workflow.result.PostModeUpdateResult
 import ru.compadre.indexer.workflow.result.SearchResult
 
 /**
@@ -23,6 +24,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         is CompareReportResult -> compareReportText(result)
         is AskResult -> askText(result)
         is SearchResult -> searchText(result)
+        is PostModeUpdateResult -> postModeUpdateText(result)
         is ChunkPreviewResult -> chunkPreviewText(result)
         is DocumentLoadResult -> documentLoadText(result)
     }
@@ -35,8 +37,9 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  index --input <dir> --all-strategies")
         add("  compare --input <dir>")
         add("  ask --query <text> --mode plain")
-        add("  ask --query <text> --mode rag --strategy <fixed|structured> --top <N>")
-        add("  search --query <text> --strategy <fixed|structured> --top <N>")
+        add("  ask --query <text> --mode rag --strategy <fixed|structured> --top <N> --post-mode <mode>")
+        add("  search --query <text> --strategy <fixed|structured> --top <N> --post-mode <mode>")
+        add("  set --post-mode <none|threshold-filter|heuristic-filter|heuristic-rerank|model-rerank|config>")
         add("  help")
         add("")
         add("Текущий конфиг:")
@@ -46,8 +49,19 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  ollama.embeddingModel = ${result.embeddingModel}")
         add("  chunking.fixedSize = ${result.fixedSize}")
         add("  chunking.overlap = ${result.overlap}")
+        add("  search.postProcessingMode = ${result.postProcessingMode}")
         add("")
         add("Текущий статус: index сохраняет SQLite-индекс, compare строит comparison.md, ask поддерживает plain и rag, search показывает retrieval topK.")
+    }.joinToString(separator = System.lineSeparator())
+
+    private fun postModeUpdateText(result: PostModeUpdateResult): String = buildList {
+        if (result.resetToConfig) {
+            add("Runtime override post-mode сброшен.")
+            add("Используется значение из конфига: ${result.effectivePostMode}")
+        } else {
+            add("Runtime override post-mode обновлён.")
+            add("Новый режим: ${result.effectivePostMode}")
+        }
     }.joinToString(separator = System.lineSeparator())
 
     private fun askText(result: AskResult): String = buildList {
