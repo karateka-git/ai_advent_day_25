@@ -255,10 +255,11 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
 
         if (retrievalResult.selectedCandidates.isEmpty()) {
             add("  После ${retrievalResult.mode.configValue} не осталось кандидатов.")
+            return@buildList
         }
 
-        add("  Кандидаты pipeline:")
-        retrievalResult.finalCandidates.forEachIndexed { index, candidate ->
+        add("  Финальные кандидаты:")
+        retrievalResult.selectedCandidates.forEachIndexed { index, candidate ->
             addAll(candidateLines(index + 1, candidate, retrievalResult.mode))
         }
     }
