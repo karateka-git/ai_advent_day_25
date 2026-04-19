@@ -240,7 +240,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         }
 
         add("  Кандидаты pipeline:")
-        retrievalResult.candidates.forEachIndexed { index, candidate ->
+        retrievalResult.finalCandidates.forEachIndexed { index, candidate ->
             addAll(candidateLines(index + 1, candidate))
         }
     }
@@ -249,6 +249,8 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         val chunk = candidate.match.embeddedChunk.chunk
         return buildList {
             add("  ${index}. selected = ${if (candidate.selected) "yes" else "no"}")
+            add("     initialRank = ${candidate.initialRank}")
+            add("     finalRank = ${candidate.finalRank ?: "-"}")
             add("     cosineScore = ${"%.4f".format(candidate.cosineScore)}")
             add("     finalScore = ${"%.4f".format(candidate.finalScore)}")
             candidate.heuristicScore?.let { add("     heuristicScore = ${"%.4f".format(it)}") }
