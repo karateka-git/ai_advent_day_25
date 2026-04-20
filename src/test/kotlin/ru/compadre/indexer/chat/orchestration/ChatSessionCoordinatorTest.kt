@@ -1,5 +1,6 @@
 package ru.compadre.indexer.chat.orchestration
 
+import ru.compadre.indexer.chat.memory.model.ChatTurnType
 import ru.compadre.indexer.chat.memory.TaskStateUpdateService
 import ru.compadre.indexer.chat.model.FixedTerm
 import ru.compadre.indexer.chat.model.TaskState
@@ -46,6 +47,7 @@ class ChatSessionCoordinatorTest {
                 llmClient = FakeChatCompletionClient(
                     """
                     {
+                      "turnType": "knowledge_question",
                       "goal": "Сделать mini-chat с RAG",
                       "constraints": ["CLI-only"],
                       "fixedTerms": [
@@ -77,6 +79,7 @@ class ChatSessionCoordinatorTest {
         }
 
         assertEquals(RetrievalAction.PERFORMED, result.retrievalQuery.action)
+        assertEquals(ChatTurnType.KNOWLEDGE_QUESTION, result.turnType)
         assertNotNull(result.assistantMessageRecord)
         assertNotNull(result.ragAnswer)
         assertEquals(2, result.session.messages.size)
@@ -102,6 +105,7 @@ class ChatSessionCoordinatorTest {
                 llmClient = FakeChatCompletionClient(
                     """
                     {
+                      "turnType": "service_turn",
                       "goal": "Сделать mini-chat с RAG",
                       "constraints": [],
                       "fixedTerms": [],
@@ -130,6 +134,7 @@ class ChatSessionCoordinatorTest {
         }
 
         assertEquals(RetrievalAction.SKIPPED, result.retrievalQuery.action)
+        assertEquals(ChatTurnType.SERVICE_TURN, result.turnType)
         assertEquals(RetrievalSkipReason.SHORT_SERVICE_TURN, result.retrievalQuery.skipReason)
         assertNull(result.assistantMessageRecord)
         assertNull(result.ragAnswer)
@@ -148,6 +153,7 @@ class ChatSessionCoordinatorTest {
                 llmClient = FakeChatCompletionClient(
                     """
                     {
+                      "turnType": "knowledge_question",
                       "goal": "Сделать mini-chat с RAG",
                       "constraints": ["CLI-only"],
                       "fixedTerms": [],
@@ -190,6 +196,55 @@ class ChatSessionCoordinatorTest {
             ),
             traceSink.records.map(TraceRecord::kind),
         )
+    }
+
+    @Test
+    fun `handle user turn skips retrieval when unified update marks task state update`() {
+        val answerService = FakeGroundedChatAnswerService(
+            ragAnswer = RagAnswer(
+                answer = "unused",
+                retrievalResult = emptyRetrievalResult(),
+            ),
+        )
+        val coordinator = ChatSessionCoordinator(
+            chatSessionStore = InMemoryChatSessionStore(nowProvider = { Instant.parse("2026-04-20T13:30:00Z") }),
+            taskStateUpdateService = TaskStateUpdateService(
+                llmClient = FakeChatCompletionClient(
+                    """
+                    {
+                      "turnType": "task_state_update",
+                      "goal": "Обсуждать текст «Реформа»",
+                      "constraints": ["Обсуждать только текст «Реформа»"],
+                      "fixedTerms": [],
+                      "knownFacts": [],
+                      "openQuestions": [],
+                      "lastUserIntent": "Зафиксировать рамку диалога"
+                    }
+                    """.trimIndent(),
+                ),
+            ),
+            retrievalQueryBuilder = RetrievalQueryBuilder(),
+            groundedChatAnswerService = answerService,
+            traceSink = RecordingTraceSink(),
+            nowProvider = { Instant.parse("2026-04-20T13:30:00Z") },
+            sessionIdProvider = { "session-routing" },
+        )
+        val session = coordinator.startSession()
+
+        val result = runSuspend {
+            coordinator.handleUserTurn(
+                sessionId = session.sessionId,
+                userMessage = "Теперь держимся только текста Реформа без отвлечений",
+                config = testConfig(),
+                strategy = ChunkingStrategy.STRUCTURED,
+            )
+        }
+
+        assertEquals(ChatTurnType.TASK_STATE_UPDATE, result.turnType)
+        assertEquals(RetrievalAction.SKIPPED, result.retrievalQuery.action)
+        assertEquals(RetrievalSkipReason.TASK_STATE_UPDATE_ONLY, result.retrievalQuery.skipReason)
+        assertNull(result.ragAnswer)
+        assertNull(answerService.lastRequest)
     }
 
     private fun testConfig(): AppConfig =

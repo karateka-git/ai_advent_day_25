@@ -1,13 +1,16 @@
 package ru.compadre.indexer.chat.orchestration
 
+import ru.compadre.indexer.chat.memory.model.ChatTurnType
 import ru.compadre.indexer.chat.memory.TaskStateUpdateService
 import ru.compadre.indexer.chat.model.ChatMessageRecord
 import ru.compadre.indexer.chat.model.ChatRole
 import ru.compadre.indexer.chat.model.ChatSession
+import ru.compadre.indexer.chat.model.TaskState
 import ru.compadre.indexer.chat.orchestration.model.ChatTurnResult
 import ru.compadre.indexer.chat.orchestration.model.GroundedChatAnswerRequest
 import ru.compadre.indexer.chat.retrieval.RetrievalQueryBuilder
 import ru.compadre.indexer.chat.retrieval.model.RetrievalAction
+import ru.compadre.indexer.chat.retrieval.model.RetrievalSkipReason
 import ru.compadre.indexer.chat.storage.ChatSessionStore
 import ru.compadre.indexer.config.AppConfig
 import ru.compadre.indexer.model.ChunkingStrategy
@@ -84,19 +87,22 @@ class ChatSessionCoordinator(
             timestamp = userTimestamp,
         )
         val recentHistory = existingSession.messages.takeLast(recentHistorySize)
-        val updatedTaskState = taskStateUpdateService.update(
+        val updateResult = taskStateUpdateService.updateWithTurnType(
             requestId = requestId,
             previousTaskState = existingSession.taskState,
             recentHistory = recentHistory,
             userMessage = userMessage,
             config = config.llm,
         )
+        val turnType = updateResult.turnType
+        val updatedTaskState = updateResult.taskState
         val sessionAfterUserTurn = existingSession.copy(
             messages = existingSession.messages + userMessageRecord,
             taskState = updatedTaskState,
             updatedAt = userTimestamp,
         )
-        val retrievalQuery = retrievalQueryBuilder.build(
+        val retrievalQuery = retrievalQueryForTurnType(
+            turnType = turnType,
             userMessage = userMessage,
             taskState = updatedTaskState,
             recentHistory = recentHistory,
@@ -108,6 +114,7 @@ class ChatSessionCoordinator(
             payload = tracePayload {
                 putString("sessionId", sessionAfterUserTurn.sessionId)
                 putInt("turnId", userMessageRecord.turnId)
+                putString("turnType", turnType.name)
                 put("retrieval", retrievalActionTracePayload(retrievalQuery.action, retrievalQuery.skipReason, retrievalQuery.query))
                 put("taskState", taskStateTracePayload(updatedTaskState))
             },
@@ -122,6 +129,7 @@ class ChatSessionCoordinator(
                 payload = tracePayload {
                     putString("sessionId", storedSession.sessionId)
                     putInt("turnId", userMessageRecord.turnId)
+                    putString("turnType", turnType.name)
                     put("retrieval", retrievalActionTracePayload(retrievalQuery.action, retrievalQuery.skipReason, retrievalQuery.query))
                 },
             )
@@ -132,6 +140,7 @@ class ChatSessionCoordinator(
                 payload = tracePayload {
                     putString("sessionId", storedSession.sessionId)
                     putInt("turnId", userMessageRecord.turnId)
+                    putString("turnType", turnType.name)
                     putBoolean("hasAssistantMessage", false)
                     putBoolean("hasRagAnswer", false)
                     put("taskState", taskStateTracePayload(storedSession.taskState))
@@ -139,6 +148,7 @@ class ChatSessionCoordinator(
             )
             return ChatTurnResult(
                 session = storedSession,
+                turnType = turnType,
                 userMessageRecord = userMessageRecord,
                 retrievalQuery = retrievalQuery,
             )
@@ -184,6 +194,7 @@ class ChatSessionCoordinator(
             payload = tracePayload {
                 putString("sessionId", finalSession.sessionId)
                 putInt("turnId", userMessageRecord.turnId)
+                putString("turnType", turnType.name)
                 putBoolean("hasAssistantMessage", true)
                 putBoolean("hasRagAnswer", true)
                 putString("assistantAnswer", assistantMessageRecord.text)
@@ -193,12 +204,42 @@ class ChatSessionCoordinator(
 
         return ChatTurnResult(
             session = finalSession,
+            turnType = turnType,
             userMessageRecord = userMessageRecord,
             assistantMessageRecord = assistantMessageRecord,
             retrievalQuery = retrievalQuery,
             ragAnswer = ragAnswer,
         )
     }
+
+    private fun retrievalQueryForTurnType(
+        turnType: ChatTurnType,
+        userMessage: String,
+        taskState: TaskState,
+        recentHistory: List<ChatMessageRecord>,
+    ): ru.compadre.indexer.chat.retrieval.model.RetrievalQueryBuildResult =
+        when (turnType) {
+            ChatTurnType.SERVICE_TURN -> skippedRetrieval(RetrievalSkipReason.SHORT_SERVICE_TURN)
+            ChatTurnType.TASK_STATE_UPDATE,
+            ChatTurnType.TOPIC_SWITCH,
+                -> skippedRetrieval(RetrievalSkipReason.TASK_STATE_UPDATE_ONLY)
+
+            ChatTurnType.KNOWLEDGE_QUESTION,
+            ChatTurnType.ANSWER_REWRITE,
+                -> retrievalQueryBuilder.build(
+                    userMessage = userMessage,
+                    taskState = taskState,
+                    recentHistory = recentHistory,
+                )
+        }
+
+    private fun skippedRetrieval(
+        reason: RetrievalSkipReason,
+    ): ru.compadre.indexer.chat.retrieval.model.RetrievalQueryBuildResult =
+        ru.compadre.indexer.chat.retrieval.model.RetrievalQueryBuildResult(
+            action = RetrievalAction.SKIPPED,
+            skipReason = reason,
+        )
 
     private fun resolveDatabasePath(
         outputDir: String,
