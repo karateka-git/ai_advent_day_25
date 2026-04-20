@@ -90,8 +90,8 @@ class ChatSessionCoordinatorTest {
         assertEquals("Историю лучше хранить в рамках сессии.", result.assistantMessageRecord.text)
         assertEquals("Сделать mini-chat с RAG", result.session.taskState.goal)
         assertEquals("request-1", answerService.lastRequest?.requestId)
-        assertTrue(answerService.lastRequest?.retrievalQuery?.contains("CLI-only") == true)
-        assertTrue(answerService.lastRequest?.retrievalQuery?.contains("Как хранить историю диалога?") == true)
+        assertTrue(answerService.lastRequest?.retrievalQuery?.contains("Определить хранение истории") == true)
+        assertTrue(answerService.lastRequest?.retrievalQuery?.contains("CLI-only") == false)
     }
 
     @Test
