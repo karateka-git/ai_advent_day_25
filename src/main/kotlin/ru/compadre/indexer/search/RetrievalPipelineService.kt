@@ -28,12 +28,12 @@ import java.util.UUID
  */
 class RetrievalPipelineService(
     private val searchEngine: SearchEngine,
+    private val traceSink: TraceSink = NoOpTraceSink,
     private val noOpPostRetrievalProcessor: PostRetrievalProcessor = NoOpPostRetrievalProcessor(),
     private val thresholdPostRetrievalProcessor: PostRetrievalProcessor = ThresholdPostRetrievalProcessor(),
     private val heuristicFilterPostRetrievalProcessor: PostRetrievalProcessor = HeuristicFilterPostRetrievalProcessor(),
     private val heuristicRerankPostRetrievalProcessor: PostRetrievalProcessor = HeuristicRerankPostRetrievalProcessor(),
-    private val modelRerankPostRetrievalProcessor: PostRetrievalProcessor = ModelRerankPostRetrievalProcessor(),
-    private val traceSink: TraceSink = NoOpTraceSink,
+    private val modelRerankPostRetrievalProcessor: PostRetrievalProcessor = ModelRerankPostRetrievalProcessor(traceSink = traceSink),
 ) {
     suspend fun retrieve(
         requestId: String? = null,

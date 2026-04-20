@@ -6,12 +6,20 @@ import ru.compadre.indexer.search.model.PostRetrievalRequest
 import ru.compadre.indexer.search.model.RetrievalCandidate
 import ru.compadre.indexer.search.model.RetrievalPipelineResult
 import ru.compadre.indexer.search.model.SearchMatch
+import ru.compadre.indexer.trace.NoOpTraceSink
+import ru.compadre.indexer.trace.TraceSink
+import ru.compadre.indexer.trace.emitRecord
+import ru.compadre.indexer.trace.putBoolean
+import ru.compadre.indexer.trace.putDouble
+import ru.compadre.indexer.trace.putString
+import ru.compadre.indexer.trace.tracePayload
 
 /**
- * Model-based reranker поверх кандидатов vector search.
+ * Model-based reranker over vector-search candidates.
  */
 class ModelRerankPostRetrievalProcessor(
     private val modelRerankJudge: ModelRerankJudge = ModelRerankJudge(),
+    private val traceSink: TraceSink = NoOpTraceSink,
 ) : PostRetrievalProcessor {
     override suspend fun process(
         request: PostRetrievalRequest,
@@ -33,6 +41,23 @@ class ModelRerankPostRetrievalProcessor(
                 config = config.llm,
                 fallbackCosineScore = match.score,
             )
+            request.requestId?.let { requestId ->
+                traceSink.emitRecord(
+                    requestId = requestId,
+                    kind = "model_rerank_scored",
+                    stage = "retrieval.model_rerank",
+                    payload = tracePayload {
+                        putString("query", request.query)
+                        putString("chunkId", chunk.metadata.chunkId)
+                        putString("title", chunk.metadata.title)
+                        putString("section", chunk.metadata.section)
+                        putDouble("cosineScore", match.score)
+                        putDouble("modelScore", evaluation.score)
+                        putBoolean("usedFallback", evaluation.usedFallback)
+                        putString("rawResponse", evaluation.rawResponse)
+                    },
+                )
+            }
 
             ScoredModelCandidate(
                 match = match,
@@ -125,4 +150,3 @@ class ModelRerankPostRetrievalProcessor(
         private const val MODEL_SCORE_MULTIPLIER = 100.0
     }
 }
-
