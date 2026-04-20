@@ -17,6 +17,7 @@ class ChatSessionTest {
         assertEquals("session-1", session.sessionId)
         assertEquals(emptyList(), session.messages)
         assertEquals(TaskState(), session.taskState)
+        assertEquals(null, session.lastGroundedAnswer)
         assertEquals(createdAt, session.createdAt)
         assertEquals(createdAt, session.updatedAt)
     }

@@ -99,6 +99,7 @@ class ChatSessionCoordinator(
         val sessionAfterUserTurn = existingSession.copy(
             messages = existingSession.messages + userMessageRecord,
             taskState = updatedTaskState,
+            lastGroundedAnswer = existingSession.lastGroundedAnswer,
             updatedAt = userTimestamp,
         )
         val retrievalQuery = retrievalQueryForTurnType(
@@ -184,6 +185,7 @@ class ChatSessionCoordinator(
         val finalSession = chatSessionStore.save(
             sessionAfterUserTurn.copy(
                 messages = sessionAfterUserTurn.messages + assistantMessageRecord,
+                lastGroundedAnswer = ragAnswer.takeUnless { it.isRefusal } ?: sessionAfterUserTurn.lastGroundedAnswer,
                 updatedAt = assistantTimestamp,
             ),
         )

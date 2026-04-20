@@ -1,5 +1,6 @@
 package ru.compadre.indexer.chat.model
 
+import ru.compadre.indexer.qa.model.RagAnswer
 import java.time.Instant
 
 /**
@@ -27,6 +28,7 @@ data class ChatSession(
     val sessionId: String,
     val messages: List<ChatMessageRecord>,
     val taskState: TaskState,
+    val lastGroundedAnswer: RagAnswer? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -46,6 +48,7 @@ data class ChatSession(
                 sessionId = sessionId,
                 messages = emptyList(),
                 taskState = TaskState(),
+                lastGroundedAnswer = null,
                 createdAt = createdAt,
                 updatedAt = createdAt,
             )
