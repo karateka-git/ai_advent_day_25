@@ -38,19 +38,12 @@ class RetrievalQueryBuilder {
             )
         }
 
-        val referencedDocument = referencedDocumentTitle(normalizedMessage, taskState)
         val previousUserQuestion = previousUserQuestion(recentHistory)
         val effectiveIntent = effectiveIntent(normalizedMessage, taskState, previousUserQuestion)
         val answerStyleRequirements = answerStyleRequirements(normalizedMessage, effectiveIntent)
         val relevantFixedTerms = relevantFixedTerms(taskState, effectiveIntent)
 
         val query = buildString {
-            referencedDocument?.let { documentTitle ->
-                append("Текст «")
-                append(documentTitle)
-                appendLine("».")
-            }
-
             appendLine(effectiveIntent)
 
             if (answerStyleRequirements != null) {
@@ -130,17 +123,6 @@ class RetrievalQueryBuilder {
             effectiveIntent.contains(term.definition, ignoreCase = true)
     }
 
-    private fun referencedDocumentTitle(
-        userMessage: String,
-        taskState: TaskState,
-    ): String? =
-        extractDocumentTitle(userMessage)
-            ?: taskState.constraints.firstNotNullOfOrNull(::extractDocumentTitle)
-            ?: taskState.goal?.let(::extractDocumentTitle)
-
-    private fun extractDocumentTitle(text: String): String? =
-        DOCUMENT_TITLE_REGEX.find(text)?.groupValues?.get(1)?.trim()?.takeIf(String::isNotBlank)
-
     private fun skippedShortServiceTurn(): RetrievalQueryBuildResult =
         RetrievalQueryBuildResult(
             action = RetrievalAction.SKIPPED,
@@ -176,6 +158,5 @@ class RetrievalQueryBuilder {
             "по пунктам",
             "подробно",
         )
-        private val DOCUMENT_TITLE_REGEX = Regex("""текст\s+[«"]([^»"]+)[»"]""", RegexOption.IGNORE_CASE)
     }
 }

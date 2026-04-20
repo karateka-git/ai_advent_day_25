@@ -1,16 +1,16 @@
 package ru.compadre.indexer.chat.retrieval
 
-import ru.compadre.indexer.chat.model.FixedTerm
-import ru.compadre.indexer.chat.model.TaskState
-import ru.compadre.indexer.chat.model.ChatMessageRecord
-import ru.compadre.indexer.chat.model.ChatRole
-import ru.compadre.indexer.chat.retrieval.model.RetrievalAction
-import ru.compadre.indexer.chat.retrieval.model.RetrievalQueryBuildResult
-import ru.compadre.indexer.chat.retrieval.model.RetrievalSkipReason
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import ru.compadre.indexer.chat.model.ChatMessageRecord
+import ru.compadre.indexer.chat.model.ChatRole
+import ru.compadre.indexer.chat.model.FixedTerm
+import ru.compadre.indexer.chat.model.TaskState
+import ru.compadre.indexer.chat.retrieval.model.RetrievalAction
+import ru.compadre.indexer.chat.retrieval.model.RetrievalQueryBuildResult
+import ru.compadre.indexer.chat.retrieval.model.RetrievalSkipReason
 
 class RetrievalQueryBuilderTest {
     private val builder = RetrievalQueryBuilder()
@@ -50,10 +50,14 @@ class RetrievalQueryBuilderTest {
 
         assertEquals(RetrievalAction.PERFORMED, result.action)
         assertEquals(null, result.skipReason)
-        assertTrue(result.query!!.contains("Найти способ хранения истории диалога для mini-chat с RAG"))
-        assertTrue(!result.query.contains("Сделать mini-chat с RAG"))
-        assertTrue(!result.query.contains("CLI-only"))
-        assertTrue(!result.query.contains("task state: рабочая память задачи"))
+        assertEquals(
+            "Найти способ хранения истории диалога для mini-chat с RAG",
+            result.query,
+        )
+        val query = result.query!!
+        assertTrue(!query.contains("Сделать mini-chat с RAG"))
+        assertTrue(!query.contains("CLI-only"))
+        assertTrue(!query.contains("task state: рабочая память задачи"))
     }
 
     @Test
@@ -91,8 +95,7 @@ class RetrievalQueryBuilderTest {
         )
 
         assertEquals(RetrievalAction.PERFORMED, result.action)
-        assertTrue(result.query!!.contains("Текст «Реформа»."))
-        assertTrue(result.query.contains("Реформа"))
+        assertTrue(result.query!!.contains("Реформа"))
         assertTrue(result.query.contains("Найти в тексте «Реформа» описание образа богини Реформы"))
         assertTrue(result.query.contains("Формат ответа:"))
         assertTrue(result.query.contains("Коротко, в 2-3 предложениях."))
@@ -110,10 +113,13 @@ class RetrievalQueryBuilderTest {
         )
 
         assertEquals(RetrievalAction.PERFORMED, result.action)
-        assertTrue(result.query!!.contains("Текст «Реформа»."))
-        assertTrue(result.query.contains("дополнительные детали происхождения богини Реформы"))
-        assertTrue(!result.query.contains("Текущее намерение:"))
-        assertTrue(!result.query.contains("Ограничения:"))
+        assertEquals(
+            "Найти в тексте «Реформа» дополнительные детали происхождения богини Реформы",
+            result.query,
+        )
+        val query = result.query!!
+        assertTrue(!query.contains("Текущее намерение:"))
+        assertTrue(!query.contains("Ограничения:"))
     }
 
     @Test
