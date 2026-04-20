@@ -88,6 +88,7 @@ class TaskStateUpdateServiceTest {
         )
 
         val updatedState = service.update(
+            requestId = "request-1",
             previousTaskState = previousTaskState,
             recentHistory = listOf(
                 ChatMessageRecord(
@@ -124,6 +125,7 @@ class TaskStateUpdateServiceTest {
         )
 
         val updatedState = service.update(
+            requestId = "request-2",
             previousTaskState = TaskState(),
             recentHistory = emptyList(),
             userMessage = "Давай хранить историю только в рамках сессии",

@@ -371,9 +371,10 @@ private fun createChatSessionCoordinator(traceSink: TraceSink): ChatSessionCoord
 
     return ChatSessionCoordinator(
         chatSessionStore = InMemoryChatSessionStore(),
-        taskStateUpdateService = TaskStateUpdateService(),
+        taskStateUpdateService = TaskStateUpdateService(traceSink = traceSink),
         retrievalQueryBuilder = RetrievalQueryBuilder(),
         groundedChatAnswerService = RagGroundedChatAnswerService(ragQuestionAnsweringService),
+        traceSink = traceSink,
     )
 }
 

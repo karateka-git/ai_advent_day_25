@@ -22,6 +22,8 @@ import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.qa.model.RagAnswer
 import ru.compadre.indexer.search.model.PostRetrievalMode
 import ru.compadre.indexer.search.model.RetrievalPipelineResult
+import ru.compadre.indexer.trace.TraceRecord
+import ru.compadre.indexer.trace.TraceSink
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -58,6 +60,7 @@ class ChatSessionCoordinatorTest {
             ),
             retrievalQueryBuilder = RetrievalQueryBuilder(),
             groundedChatAnswerService = answerService,
+            traceSink = RecordingTraceSink(),
             nowProvider = { Instant.parse("2026-04-20T13:00:00Z") },
             sessionIdProvider = { "session-1" },
             requestIdProvider = { "request-1" },
@@ -111,6 +114,7 @@ class ChatSessionCoordinatorTest {
             ),
             retrievalQueryBuilder = RetrievalQueryBuilder(),
             groundedChatAnswerService = answerService,
+            traceSink = RecordingTraceSink(),
             nowProvider = { Instant.parse("2026-04-20T13:10:00Z") },
             sessionIdProvider = { "session-2" },
         )
@@ -133,6 +137,59 @@ class ChatSessionCoordinatorTest {
         assertEquals("окей", result.session.messages.single().text)
         assertEquals("Продолжить диалог", result.session.taskState.lastUserIntent)
         assertNull(answerService.lastRequest)
+    }
+
+    @Test
+    fun `handle user turn emits chat trace records`() {
+        val traceSink = RecordingTraceSink()
+        val coordinator = ChatSessionCoordinator(
+            chatSessionStore = InMemoryChatSessionStore(nowProvider = { Instant.parse("2026-04-20T13:20:00Z") }),
+            taskStateUpdateService = TaskStateUpdateService(
+                llmClient = FakeChatCompletionClient(
+                    """
+                    {
+                      "goal": "Сделать mini-chat с RAG",
+                      "constraints": ["CLI-only"],
+                      "fixedTerms": [],
+                      "knownFacts": [],
+                      "openQuestions": [],
+                      "lastUserIntent": "Проверить trace"
+                    }
+                    """.trimIndent(),
+                ),
+                traceSink = traceSink,
+            ),
+            retrievalQueryBuilder = RetrievalQueryBuilder(),
+            groundedChatAnswerService = FakeGroundedChatAnswerService(
+                ragAnswer = RagAnswer(
+                    answer = "Тестовый ответ",
+                    retrievalResult = emptyRetrievalResult(),
+                ),
+            ),
+            traceSink = traceSink,
+            nowProvider = { Instant.parse("2026-04-20T13:20:00Z") },
+            sessionIdProvider = { "session-trace" },
+            requestIdProvider = { "request-trace" },
+        )
+        val session = coordinator.startSession()
+
+        runSuspend {
+            coordinator.handleUserTurn(
+                sessionId = session.sessionId,
+                userMessage = "Как хранить историю?",
+                config = testConfig(),
+                strategy = ChunkingStrategy.STRUCTURED,
+            )
+        }
+
+        assertEquals(
+            listOf(
+                "task_state_updated",
+                "retrieval_query_built",
+                "chat_turn_completed",
+            ),
+            traceSink.records.map(TraceRecord::kind),
+        )
     }
 
     private fun testConfig(): AppConfig =
@@ -208,6 +265,14 @@ class ChatSessionCoordinatorTest {
         override suspend fun answer(request: ru.compadre.indexer.chat.orchestration.model.GroundedChatAnswerRequest): RagAnswer {
             lastRequest = request
             return ragAnswer
+        }
+    }
+
+    private class RecordingTraceSink : TraceSink {
+        val records = mutableListOf<TraceRecord>()
+
+        override fun emit(record: TraceRecord) {
+            records += record
         }
     }
 

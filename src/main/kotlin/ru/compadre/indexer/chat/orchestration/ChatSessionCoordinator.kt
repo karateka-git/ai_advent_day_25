@@ -11,6 +11,15 @@ import ru.compadre.indexer.chat.retrieval.model.RetrievalAction
 import ru.compadre.indexer.chat.storage.ChatSessionStore
 import ru.compadre.indexer.config.AppConfig
 import ru.compadre.indexer.model.ChunkingStrategy
+import ru.compadre.indexer.trace.NoOpTraceSink
+import ru.compadre.indexer.trace.TraceSink
+import ru.compadre.indexer.trace.emitRecord
+import ru.compadre.indexer.trace.putBoolean
+import ru.compadre.indexer.trace.putInt
+import ru.compadre.indexer.trace.putString
+import ru.compadre.indexer.trace.retrievalActionTracePayload
+import ru.compadre.indexer.trace.taskStateTracePayload
+import ru.compadre.indexer.trace.tracePayload
 import java.nio.file.Path
 import java.time.Instant
 import java.util.UUID
@@ -34,6 +43,7 @@ class ChatSessionCoordinator(
     private val taskStateUpdateService: TaskStateUpdateService,
     private val retrievalQueryBuilder: RetrievalQueryBuilder,
     private val groundedChatAnswerService: GroundedChatAnswerService,
+    private val traceSink: TraceSink = NoOpTraceSink,
     private val nowProvider: () -> Instant = Instant::now,
     private val sessionIdProvider: () -> String = { UUID.randomUUID().toString() },
     private val requestIdProvider: () -> String = { "chat-${UUID.randomUUID()}" },
@@ -65,6 +75,7 @@ class ChatSessionCoordinator(
     ): ChatTurnResult {
         val existingSession = chatSessionStore.findById(sessionId)
             ?: chatSessionStore.create(sessionId)
+        val requestId = requestIdProvider()
         val userTimestamp = nowProvider()
         val userMessageRecord = ChatMessageRecord(
             turnId = existingSession.messages.nextTurnId(),
@@ -74,6 +85,7 @@ class ChatSessionCoordinator(
         )
         val recentHistory = existingSession.messages.takeLast(recentHistorySize)
         val updatedTaskState = taskStateUpdateService.update(
+            requestId = requestId,
             previousTaskState = existingSession.taskState,
             recentHistory = recentHistory,
             userMessage = userMessage,
@@ -88,9 +100,42 @@ class ChatSessionCoordinator(
             userMessage = userMessage,
             taskState = updatedTaskState,
         )
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "retrieval_query_built",
+            stage = "chat.retrieval_query",
+            payload = tracePayload {
+                putString("sessionId", sessionAfterUserTurn.sessionId)
+                putInt("turnId", userMessageRecord.turnId)
+                put("retrieval", retrievalActionTracePayload(retrievalQuery.action, retrievalQuery.skipReason, retrievalQuery.query))
+                put("taskState", taskStateTracePayload(updatedTaskState))
+            },
+        )
 
         if (retrievalQuery.action == RetrievalAction.SKIPPED) {
             val storedSession = chatSessionStore.save(sessionAfterUserTurn)
+            traceSink.emitRecord(
+                requestId = requestId,
+                kind = "retrieval_skipped",
+                stage = "chat.retrieval",
+                payload = tracePayload {
+                    putString("sessionId", storedSession.sessionId)
+                    putInt("turnId", userMessageRecord.turnId)
+                    put("retrieval", retrievalActionTracePayload(retrievalQuery.action, retrievalQuery.skipReason, retrievalQuery.query))
+                },
+            )
+            traceSink.emitRecord(
+                requestId = requestId,
+                kind = "chat_turn_completed",
+                stage = "chat.turn_result",
+                payload = tracePayload {
+                    putString("sessionId", storedSession.sessionId)
+                    putInt("turnId", userMessageRecord.turnId)
+                    putBoolean("hasAssistantMessage", false)
+                    putBoolean("hasRagAnswer", false)
+                    put("taskState", taskStateTracePayload(storedSession.taskState))
+                },
+            )
             return ChatTurnResult(
                 session = storedSession,
                 userMessageRecord = userMessageRecord,
@@ -102,7 +147,7 @@ class ChatSessionCoordinator(
         val initialTopK = maxOf(config.search.initialTopK, finalTopK)
         val ragAnswer = groundedChatAnswerService.answer(
             GroundedChatAnswerRequest(
-                requestId = requestIdProvider(),
+                requestId = requestId,
                 sessionId = sessionAfterUserTurn.sessionId,
                 userMessage = userMessage,
                 retrievalQuery = retrievalQuery.query.orEmpty(),
@@ -130,6 +175,19 @@ class ChatSessionCoordinator(
                 messages = sessionAfterUserTurn.messages + assistantMessageRecord,
                 updatedAt = assistantTimestamp,
             ),
+        )
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "chat_turn_completed",
+            stage = "chat.turn_result",
+            payload = tracePayload {
+                putString("sessionId", finalSession.sessionId)
+                putInt("turnId", userMessageRecord.turnId)
+                putBoolean("hasAssistantMessage", true)
+                putBoolean("hasRagAnswer", true)
+                putString("assistantAnswer", assistantMessageRecord.text)
+                put("taskState", taskStateTracePayload(finalSession.taskState))
+            },
         )
 
         return ChatTurnResult(

@@ -10,12 +10,21 @@ import ru.compadre.indexer.config.LlmSection
 import ru.compadre.indexer.llm.ChatCompletionClient
 import ru.compadre.indexer.llm.ExternalLlmClient
 import ru.compadre.indexer.llm.model.ChatMessage
+import ru.compadre.indexer.trace.NoOpTraceSink
+import ru.compadre.indexer.trace.TraceSink
+import ru.compadre.indexer.trace.chatHistoryTracePayload
+import ru.compadre.indexer.trace.emitRecord
+import ru.compadre.indexer.trace.putBoolean
+import ru.compadre.indexer.trace.putString
+import ru.compadre.indexer.trace.taskStateTracePayload
+import ru.compadre.indexer.trace.tracePayload
 
 /**
  * Обновляет компактную память задачи по предыдущему состоянию и новым сообщениям диалога.
  */
 class TaskStateUpdateService(
     private val llmClient: ChatCompletionClient = ExternalLlmClient(),
+    private val traceSink: TraceSink = NoOpTraceSink,
     private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -31,6 +40,7 @@ class TaskStateUpdateService(
      * @return новый `TaskState` или предыдущий state при невалидном update-результате.
      */
     fun update(
+        requestId: String,
         previousTaskState: TaskState,
         recentHistory: List<ChatMessageRecord>,
         userMessage: String,
@@ -42,8 +52,24 @@ class TaskStateUpdateService(
             userMessage = userMessage,
         )
         val completion = llmClient.complete(config, messages)
+        val updatedTaskState = parseModelCompletion(completion) ?: previousTaskState
+        val appliedFallback = updatedTaskState == previousTaskState
 
-        return parseModelCompletion(completion) ?: previousTaskState
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "task_state_updated",
+            stage = "chat.memory_update",
+            payload = tracePayload {
+                putString("userMessage", userMessage)
+                putBoolean("appliedFallback", appliedFallback)
+                put("recentHistory", chatHistoryTracePayload(recentHistory))
+                put("previousTaskState", taskStateTracePayload(previousTaskState))
+                put("newTaskState", taskStateTracePayload(updatedTaskState))
+                putString("fallbackReason", if (appliedFallback) "invalid_or_empty_memory_update" else null)
+            },
+        )
+
+        return updatedTaskState
     }
 
     internal fun parseModelCompletion(rawCompletion: String): TaskState? {
