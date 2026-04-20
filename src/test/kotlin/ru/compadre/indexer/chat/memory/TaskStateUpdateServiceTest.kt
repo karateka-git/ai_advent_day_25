@@ -1,5 +1,6 @@
 package ru.compadre.indexer.chat.memory
 
+import ru.compadre.indexer.chat.memory.model.ChatTurnType
 import ru.compadre.indexer.chat.model.ChatMessageRecord
 import ru.compadre.indexer.chat.model.ChatRole
 import ru.compadre.indexer.chat.model.FixedTerm
@@ -19,6 +20,7 @@ class TaskStateUpdateServiceTest {
         val parsed = service.parseModelCompletion(
             """
             {
+              "turnType": "knowledge_question",
               "goal": "  Сделать mini-chat с RAG  ",
               "constraints": ["CLI-only", "CLI-only", "  Без веба  "],
               "fixedTerms": [
@@ -31,8 +33,13 @@ class TaskStateUpdateServiceTest {
               "lastUserIntent": "  Уточнить модель памяти "
             }
             """.trimIndent(),
+            userMessage = "Как хранить историю?",
         )
 
+        assertEquals(
+            ChatTurnType.KNOWLEDGE_QUESTION,
+            parsed?.turnType,
+        )
         assertEquals(
             TaskState(
                 goal = "Сделать mini-chat с RAG",
@@ -47,7 +54,7 @@ class TaskStateUpdateServiceTest {
                 openQuestions = listOf("Где хранить историю?"),
                 lastUserIntent = "Уточнить модель памяти",
             ),
-            parsed,
+            parsed?.taskState,
         )
     }
 
@@ -59,6 +66,7 @@ class TaskStateUpdateServiceTest {
             """
             ```json
             {
+              "turnType": "answer_rewrite",
               "goal": null,
               "constraints": [],
               "fixedTerms": [],
@@ -68,11 +76,16 @@ class TaskStateUpdateServiceTest {
             }
             ```
             """.trimIndent(),
+            userMessage = "Коротко",
         )
 
         assertEquals(
+            ChatTurnType.ANSWER_REWRITE,
+            parsed?.turnType,
+        )
+        assertEquals(
             TaskState(lastUserIntent = "Понять как обновлять TaskState"),
-            parsed,
+            parsed?.taskState,
         )
     }
 
@@ -103,6 +116,37 @@ class TaskStateUpdateServiceTest {
         )
 
         assertEquals(previousTaskState, updatedState)
+    }
+
+    @Test
+    fun `update with turn type returns unified result`() {
+        val service = TaskStateUpdateService(
+            llmClient = FakeChatCompletionClient(
+                """
+                {
+                  "turnType": "task_state_update",
+                  "goal": "Сделать mini-chat с RAG",
+                  "constraints": ["CLI-only"],
+                  "fixedTerms": [],
+                  "knownFacts": [],
+                  "openQuestions": [],
+                  "lastUserIntent": "Зафиксировать ограничения"
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = service.updateWithTurnType(
+            requestId = "request-turn-type",
+            previousTaskState = TaskState(),
+            recentHistory = emptyList(),
+            userMessage = "Будем обсуждать только CLI",
+            config = testConfig(),
+        )
+
+        assertEquals(ChatTurnType.TASK_STATE_UPDATE, result.turnType)
+        assertEquals("Сделать mini-chat с RAG", result.taskState.goal)
+        assertEquals(listOf("CLI-only"), result.taskState.constraints)
     }
 
     @Test

@@ -1,7 +1,9 @@
 package ru.compadre.indexer.chat.memory
 
 import kotlinx.serialization.json.Json
+import ru.compadre.indexer.chat.memory.model.ChatTurnType
 import ru.compadre.indexer.chat.memory.model.TaskStateUpdateCompletion
+import ru.compadre.indexer.chat.memory.model.TaskStateUpdateResult
 import ru.compadre.indexer.chat.model.ChatMessageRecord
 import ru.compadre.indexer.chat.model.ChatRole
 import ru.compadre.indexer.chat.model.FixedTerm
@@ -45,21 +47,62 @@ class TaskStateUpdateService(
         recentHistory: List<ChatMessageRecord>,
         userMessage: String,
         config: LlmSection,
-    ): TaskState {
+    ): TaskState =
+        updateWithTurnType(
+            requestId = requestId,
+            previousTaskState = previousTaskState,
+            recentHistory = recentHistory,
+            userMessage = userMessage,
+            config = config,
+        ).taskState
+
+    /**
+     * Выполняет unified memory update: одновременно определяет семантический тип
+     * текущего пользовательского хода и возвращает полный обновлённый snapshot `TaskState`.
+     *
+     * Это основной structured step для chat-orchestration:
+     * - классифицирует ход как вопрос, смену темы, update памяти, rewrite или service-turn;
+     * - обновляет память задачи с учётом истории;
+     * - даёт coordinator-слою единый результат для дальнейшего routing.
+     *
+     * При невалидном или пустом ответе модели сервис делает безопасный fallback:
+     * сохраняет предыдущее состояние памяти и определяет тип хода по минимальной
+     * защитной эвристике.
+     *
+     * @param previousTaskState предыдущее состояние памяти задачи.
+     * @param recentHistory последние релевантные сообщения диалога.
+     * @param userMessage новое сообщение пользователя.
+     * @param config настройки LLM.
+     * @return unified результат с `turnType` и новым `TaskState`.
+     */
+    fun updateWithTurnType(
+        requestId: String,
+        previousTaskState: TaskState,
+        recentHistory: List<ChatMessageRecord>,
+        userMessage: String,
+        config: LlmSection,
+    ): TaskStateUpdateResult {
         val messages = buildMessages(
             previousTaskState = previousTaskState,
             recentHistory = recentHistory,
             userMessage = userMessage,
         )
         val completion = llmClient.complete(config, messages)
-        val parsedTaskState = parseModelCompletion(completion)
-        val updatedTaskState = parsedTaskState
+        val parsedResult = parseModelCompletion(completion, userMessage)
+        val stabilizedTaskState = parsedResult?.taskState
             ?.stabilize(
                 previousTaskState = previousTaskState,
                 userMessage = userMessage,
             )
-            ?: previousTaskState
-        val appliedFallback = updatedTaskState == previousTaskState
+        val updateResult = if (parsedResult != null && stabilizedTaskState != null) {
+            parsedResult.copy(taskState = stabilizedTaskState)
+        } else {
+            TaskStateUpdateResult(
+                turnType = inferTurnType(userMessage),
+                taskState = previousTaskState,
+            )
+        }
+        val appliedFallback = updateResult.taskState == previousTaskState && parsedResult == null
 
         traceSink.emitRecord(
             requestId = requestId,
@@ -67,18 +110,22 @@ class TaskStateUpdateService(
             stage = "chat.memory_update",
             payload = tracePayload {
                 putString("userMessage", userMessage)
+                putString("turnType", updateResult.turnType.name)
                 putBoolean("appliedFallback", appliedFallback)
                 put("recentHistory", chatHistoryTracePayload(recentHistory))
                 put("previousTaskState", taskStateTracePayload(previousTaskState))
-                put("newTaskState", taskStateTracePayload(updatedTaskState))
+                put("newTaskState", taskStateTracePayload(updateResult.taskState))
                 putString("fallbackReason", if (appliedFallback) "invalid_or_empty_memory_update" else null)
             },
         )
 
-        return updatedTaskState
+        return updateResult
     }
 
-    internal fun parseModelCompletion(rawCompletion: String): TaskState? {
+    internal fun parseModelCompletion(
+        rawCompletion: String,
+        userMessage: String,
+    ): TaskStateUpdateResult? {
         val jsonPayload = extractJsonPayload(rawCompletion)
         val payload = runCatching {
             json.decodeFromString<TaskStateUpdateCompletion>(jsonPayload)
@@ -106,7 +153,11 @@ class TaskStateUpdateService(
             lastUserIntent = payload.lastUserIntent.normalizeSingleValue(),
         )
 
-        return taskState.takeIf { state -> state.hasMeaningfulContent() }
+        val normalizedTaskState = taskState.takeIf { state -> state.hasMeaningfulContent() } ?: TaskState()
+        return TaskStateUpdateResult(
+            turnType = payload.turnType ?: inferTurnType(userMessage),
+            taskState = normalizedTaskState,
+        )
     }
 
     internal fun buildMessages(
@@ -233,6 +284,17 @@ class TaskStateUpdateService(
         private const val MAX_FIXED_TERMS = 8
         private const val MAX_KNOWN_FACTS = 8
         private const val MAX_OPEN_QUESTIONS = 8
+        private const val SHORT_SERVICE_TURN_MAX_LENGTH = 16
+        private val SHORT_SERVICE_TURNS = setOf(
+            "да",
+            "ага",
+            "ок",
+            "окей",
+            "угу",
+            "хорошо",
+            "продолжай",
+            "давай дальше",
+        )
         private val GOAL_TEXT_REGEX =
             Regex("""(?:обсуждать|обсуждаем)\s+(?:не\s+)?(?:только\s+)?текст\s+[«"]([^»"]+)[»"]""", RegexOption.IGNORE_CASE)
         private val SYSTEM_PROMPT = """
@@ -241,6 +303,7 @@ class TaskStateUpdateService(
 
             Обязательная схема:
             {
+              "turnType": "knowledge_question|answer_rewrite|task_state_update|topic_switch|service_turn",
               "goal": "string|null",
               "constraints": ["string"],
               "fixedTerms": [
@@ -252,6 +315,12 @@ class TaskStateUpdateService(
             }
 
             Правила:
+            - Обязательно определи `turnType` для нового пользовательского хода.
+            - `knowledge_question`: пользователь просит новые сведения из retrieval-контекста.
+            - `answer_rewrite`: пользователь просит сократить, переформулировать или иначе переподать уже полученный ответ.
+            - `task_state_update`: пользователь задаёт ограничения, правила, термины или рамку диалога без нового вопроса по знаниям.
+            - `topic_switch`: пользователь меняет документ или основную тему обсуждения.
+            - `service_turn`: короткая служебная реплика без нового смыслового запроса.
             - Верни полный обновлённый snapshot TaskState, а не только diff.
             - Сохраняй актуальные элементы предыдущего состояния, если пользователь их не отменил.
             - Не выдумывай факты, которых не было в истории.
@@ -260,5 +329,22 @@ class TaskStateUpdateService(
             - Не добавляй markdown, комментарии, code fences и лишние поля.
             - Если данных для какого-то поля нет, оставь его пустым или null.
         """.trimIndent()
+    }
+
+    private fun inferTurnType(userMessage: String): ChatTurnType {
+        val normalized = userMessage.trim().lowercase()
+        if (normalized.isBlank()) {
+            return ChatTurnType.SERVICE_TURN
+        }
+
+        if (normalized.length <= SHORT_SERVICE_TURN_MAX_LENGTH && SHORT_SERVICE_TURNS.contains(normalized)) {
+            return ChatTurnType.SERVICE_TURN
+        }
+
+        if ('?' in normalized) {
+            return ChatTurnType.KNOWLEDGE_QUESTION
+        }
+
+        return ChatTurnType.TASK_STATE_UPDATE
     }
 }

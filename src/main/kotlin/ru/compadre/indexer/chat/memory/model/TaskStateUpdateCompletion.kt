@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class TaskStateUpdateCompletion(
+    val turnType: ChatTurnType? = null,
     val goal: String? = null,
     val constraints: List<String> = emptyList(),
     val fixedTerms: List<TaskStateUpdateFixedTerm> = emptyList(),
