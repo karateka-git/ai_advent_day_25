@@ -1,19 +1,33 @@
 package ru.compadre.indexer
 
 import kotlinx.coroutines.runBlocking
+import ru.compadre.indexer.chat.memory.TaskStateUpdateService
+import ru.compadre.indexer.chat.orchestration.ChatSessionCoordinator
+import ru.compadre.indexer.chat.orchestration.RagGroundedChatAnswerService
+import ru.compadre.indexer.chat.retrieval.RetrievalQueryBuilder
+import ru.compadre.indexer.chat.storage.InMemoryChatSessionStore
 import ru.compadre.indexer.cli.CliCommandParser
 import ru.compadre.indexer.cli.CliOutputFormatter
 import ru.compadre.indexer.cli.DefaultCliCommandParser
 import ru.compadre.indexer.cli.DefaultCliOutputFormatter
 import ru.compadre.indexer.config.AppConfig
 import ru.compadre.indexer.config.AppConfigLoader
-import ru.compadre.indexer.workflow.command.AskCommand
 import ru.compadre.indexer.config.withPostProcessingMode
+import ru.compadre.indexer.qa.RagQuestionAnsweringService
+import ru.compadre.indexer.search.BruteForceSearchEngine
+import ru.compadre.indexer.search.RetrievalPipelineService
+import ru.compadre.indexer.trace.TraceSink
 import ru.compadre.indexer.trace.TraceSinkFactory
+import ru.compadre.indexer.workflow.command.AskCommand
+import ru.compadre.indexer.workflow.command.ChatCommand
 import ru.compadre.indexer.workflow.command.HelpCommand
 import ru.compadre.indexer.workflow.command.SearchCommand
 import ru.compadre.indexer.workflow.command.SetPostModeCommand
 import ru.compadre.indexer.workflow.command.WorkflowCommand
+import ru.compadre.indexer.workflow.result.ChatHistoryViewResult
+import ru.compadre.indexer.workflow.result.ChatMemoryViewResult
+import ru.compadre.indexer.workflow.result.ChatSessionStartedResult
+import ru.compadre.indexer.workflow.result.ChatTurnCliResult
 import ru.compadre.indexer.workflow.result.PostModeUpdateResult
 import ru.compadre.indexer.workflow.service.DefaultWorkflowCommandHandler
 import ru.compadre.indexer.workflow.service.WorkflowCommandHandler
@@ -50,6 +64,16 @@ fun main(args: Array<String>) = runBlocking {
         parser.parse(args)
     } catch (error: IllegalArgumentException) {
         println(error.message ?: "Не удалось разобрать CLI-команду.")
+        return@runBlocking
+    }
+
+    if (command is ChatCommand) {
+        runChatSession(
+            formatter = formatter,
+            config = baseConfig,
+            command = command,
+            chatSessionCoordinator = createChatSessionCoordinator(traceSink),
+        )
         return@runBlocking
     }
 
@@ -151,6 +175,19 @@ private suspend fun executeInteractiveCommand(
     }
 
     return when (command) {
+        is ChatCommand -> {
+            val effectiveConfig = applySessionPostModeOverride(baseConfig, sessionPostModeOverride)
+            runChatSession(
+                formatter = formatter,
+                config = effectiveConfig,
+                command = command,
+                chatSessionCoordinator = createChatSessionCoordinator(
+                    TraceSinkFactory.create(baseConfig.app.outputDir),
+                ),
+            )
+            sessionPostModeOverride
+        }
+
         is SetPostModeCommand -> {
             val updatedOverride = command.postMode
             val effectivePostMode = updatedOverride ?: baseConfig.search.postProcessingMode
@@ -170,6 +207,86 @@ private suspend fun executeInteractiveCommand(
             println(formatter.format(executeCommandWithFeedback(command, effectiveConfig, commandHandler)))
             sessionPostModeOverride
         }
+    }
+}
+
+private suspend fun runChatSession(
+    formatter: CliOutputFormatter,
+    config: AppConfig,
+    command: ChatCommand,
+    chatSessionCoordinator: ChatSessionCoordinator,
+) {
+    var activeSession = chatSessionCoordinator.startSession()
+    println(
+        formatter.format(
+            ChatSessionStartedResult(
+                strategyLabel = command.strategy.id,
+                topK = command.topK,
+            ),
+        ),
+    )
+
+    while (true) {
+        print("chat> ")
+        val rawInput = readlnOrNull()
+            ?.trim()
+            ?.trimStart('\uFEFF')
+            ?: run {
+                println("Chat-сессия завершена.")
+                return
+            }
+
+        if (rawInput.isBlank()) {
+            continue
+        }
+
+        when (rawInput.lowercase()) {
+            ":exit" -> {
+                println("Chat-сессия завершена.")
+                return
+            }
+
+            ":memory" -> {
+                println(formatter.format(ChatMemoryViewResult(activeSession.taskState)))
+                continue
+            }
+
+            ":history" -> {
+                println(
+                    formatter.format(
+                        ChatHistoryViewResult(
+                            messages = activeSession.messages.takeLast(CHAT_HISTORY_LIMIT),
+                        ),
+                    ),
+                )
+                continue
+            }
+        }
+
+        val loadingIndicator = LoadingIndicator()
+        val turnResult = try {
+            loadingIndicator.start()
+            chatSessionCoordinator.handleUserTurn(
+                sessionId = activeSession.sessionId,
+                userMessage = rawInput,
+                config = config,
+                strategy = command.strategy,
+                topK = command.topK,
+            )
+        } finally {
+            loadingIndicator.stop()
+        }
+
+        activeSession = turnResult.session
+        println(
+            formatter.format(
+                ChatTurnCliResult(
+                    userMessage = rawInput,
+                    retrievalQuery = turnResult.retrievalQuery,
+                    ragAnswer = turnResult.ragAnswer,
+                ),
+            ),
+        )
     }
 }
 
@@ -241,6 +358,26 @@ private fun tokenizeCliInput(rawInput: String): Array<String> {
 
     return tokens.toTypedArray()
 }
+
+private fun createChatSessionCoordinator(traceSink: TraceSink): ChatSessionCoordinator {
+    val retrievalPipelineService = RetrievalPipelineService(
+        searchEngine = BruteForceSearchEngine(),
+        traceSink = traceSink,
+    )
+    val ragQuestionAnsweringService = RagQuestionAnsweringService(
+        retrievalPipelineService = retrievalPipelineService,
+        traceSink = traceSink,
+    )
+
+    return ChatSessionCoordinator(
+        chatSessionStore = InMemoryChatSessionStore(),
+        taskStateUpdateService = TaskStateUpdateService(),
+        retrievalQueryBuilder = RetrievalQueryBuilder(),
+        groundedChatAnswerService = RagGroundedChatAnswerService(ragQuestionAnsweringService),
+    )
+}
+
+private const val CHAT_HISTORY_LIMIT = 10
 
 private class LoadingIndicator {
     private val running = AtomicBoolean(false)
