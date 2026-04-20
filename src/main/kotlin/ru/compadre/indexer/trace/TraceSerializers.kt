@@ -14,6 +14,7 @@ import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.search.model.RetrievalCandidate
 import ru.compadre.indexer.search.model.SearchMatch
 import ru.compadre.indexer.workflow.command.AskCommand
+import ru.compadre.indexer.workflow.command.ChatCommand
 import ru.compadre.indexer.workflow.command.CompareCommand
 import ru.compadre.indexer.workflow.command.HelpCommand
 import ru.compadre.indexer.workflow.command.IndexCommand
@@ -28,6 +29,7 @@ fun commandTraceType(command: WorkflowCommand): String =
         is SearchCommand -> "search"
         is IndexCommand -> "index"
         is CompareCommand -> "compare"
+        is ChatCommand -> "chat"
         HelpCommand -> "help"
         is SetPostModeCommand -> "set"
     }
@@ -60,6 +62,11 @@ fun commandTracePayload(
         }
 
         is CompareCommand -> putString("inputDir", command.inputDir ?: config.app.inputDir)
+        is ChatCommand -> {
+            putString("strategy", command.strategy.id)
+            putInt("topK", command.topK)
+        }
+
         HelpCommand -> putString("postMode", config.search.postProcessingMode)
         is SetPostModeCommand -> putString("postMode", command.postMode)
     }

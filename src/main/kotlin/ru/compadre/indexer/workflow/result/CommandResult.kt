@@ -1,5 +1,8 @@
 package ru.compadre.indexer.workflow.result
 
+import ru.compadre.indexer.chat.model.ChatMessageRecord
+import ru.compadre.indexer.chat.model.TaskState
+import ru.compadre.indexer.chat.retrieval.model.RetrievalQueryBuildResult
 import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.model.RawDocument
 import ru.compadre.indexer.qa.model.RagAnswer
@@ -121,3 +124,34 @@ data class ChunkEmbeddingPreview(
     val vectorSize: Int,
     val textPreview: String,
 )
+
+/**
+ * Результат запуска новой chat-сессии.
+ */
+data class ChatSessionStartedResult(
+    val strategyLabel: String,
+    val topK: Int,
+) : CommandResult
+
+/**
+ * Результат одного chat-хода для CLI-вывода.
+ */
+data class ChatTurnCliResult(
+    val userMessage: String,
+    val retrievalQuery: RetrievalQueryBuildResult,
+    val ragAnswer: RagAnswer? = null,
+) : CommandResult
+
+/**
+ * Снимок текущей памяти задачи для CLI.
+ */
+data class ChatMemoryViewResult(
+    val taskState: TaskState,
+) : CommandResult
+
+/**
+ * Краткий вывод последних сообщений chat-сессии.
+ */
+data class ChatHistoryViewResult(
+    val messages: List<ChatMessageRecord>,
+) : CommandResult

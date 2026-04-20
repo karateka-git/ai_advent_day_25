@@ -6,6 +6,10 @@ import ru.compadre.indexer.search.model.RetrievalCandidate
 import ru.compadre.indexer.search.model.RetrievalPipelineResult
 import ru.compadre.indexer.search.model.SearchMatch
 import ru.compadre.indexer.workflow.result.AskResult
+import ru.compadre.indexer.workflow.result.ChatHistoryViewResult
+import ru.compadre.indexer.workflow.result.ChatMemoryViewResult
+import ru.compadre.indexer.workflow.result.ChatSessionStartedResult
+import ru.compadre.indexer.workflow.result.ChatTurnCliResult
 import ru.compadre.indexer.workflow.result.ChunkEmbeddingPreview
 import ru.compadre.indexer.workflow.result.ChunkPreviewResult
 import ru.compadre.indexer.workflow.result.CommandResult
@@ -29,6 +33,10 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         is PostModeUpdateResult -> postModeUpdateText(result)
         is ChunkPreviewResult -> chunkPreviewText(result)
         is DocumentLoadResult -> documentLoadText(result)
+        is ChatSessionStartedResult -> chatSessionStartedText(result)
+        is ChatTurnCliResult -> chatTurnText(result)
+        is ChatMemoryViewResult -> chatMemoryText(result)
+        is ChatHistoryViewResult -> chatHistoryText(result)
     }
 
     private fun helpText(result: HelpResult): String = buildList {
@@ -38,6 +46,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  index --input <dir> --strategy <fixed|structured>")
         add("  index --input <dir> --all-strategies")
         add("  compare --input <dir>")
+        add("  chat --strategy <fixed|structured> --top <N>")
         add("  ask --query <text> --mode plain")
         add("  ask --query <text> --mode rag --strategy <fixed|structured> --top <N> --post-mode <mode> --show-all-candidates")
         add("  search --query <text> --strategy <fixed|structured> --top <N> --post-mode <mode> --show-all-candidates")
@@ -53,7 +62,72 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
         add("  chunking.overlap = ${result.overlap}")
         add("  search.postProcessingMode = ${result.postProcessingMode}")
         add("")
-        add("Текущий статус: index сохраняет SQLite-индекс, compare строит comparison.md, ask поддерживает plain и rag, search показывает retrieval topK.")
+        add("Текущий статус: index сохраняет SQLite-индекс, compare строит comparison.md, ask поддерживает plain и rag, search показывает retrieval topK, chat запускает mini-chat с памятью задачи.")
+    }.joinToString(separator = System.lineSeparator())
+
+    private fun chatSessionStartedText(result: ChatSessionStartedResult): String = buildList {
+        add("Mini-chat с RAG и памятью задачи.")
+        add("История хранится только в текущей сессии.")
+        add("Параметры запуска:")
+        add("  strategy = ${result.strategyLabel}")
+        add("  topK = ${result.topK}")
+        add("Доступные команды: :memory, :history, :exit")
+        add("Введите сообщение:")
+    }.joinToString(separator = System.lineSeparator())
+
+    private fun chatTurnText(result: ChatTurnCliResult): String = buildList {
+        when (result.retrievalQuery.action) {
+            ru.compadre.indexer.chat.retrieval.model.RetrievalAction.SKIPPED -> {
+                add("Retrieval пропущен.")
+                add("Причина: ${result.retrievalQuery.skipReason}")
+            }
+
+            ru.compadre.indexer.chat.retrieval.model.RetrievalAction.PERFORMED -> {
+                result.ragAnswer?.let { ragAnswer ->
+                    add("Ответ:")
+                    add(ragAnswer.answer)
+                    ragAnswer.warningMessage?.let { warning ->
+                        add("")
+                        add(warning)
+                    }
+                    add("")
+                    addAll(sourcesLines(ragAnswer))
+                    quotesLines(ragAnswer)?.let { quoteLines ->
+                        add("")
+                        addAll(quoteLines)
+                    }
+                } ?: run {
+                    add("Ответ пока не получен.")
+                }
+            }
+        }
+    }.joinToString(separator = System.lineSeparator())
+
+    private fun chatMemoryText(result: ChatMemoryViewResult): String = buildList {
+        add("Память задачи:")
+        add("  goal = ${result.taskState.goal ?: "<пусто>"}")
+        add("  constraints = ${result.taskState.constraints.ifEmpty { listOf("<пусто>") }.joinToString()}")
+        add(
+            "  fixedTerms = ${
+                result.taskState.fixedTerms.ifEmpty { emptyList() }
+                    .ifEmpty { listOf(null) }
+                    .joinToString { term -> term?.let { "${it.term}: ${it.definition}" } ?: "<пусто>" }
+            }",
+        )
+        add("  knownFacts = ${result.taskState.knownFacts.ifEmpty { listOf("<пусто>") }.joinToString()}")
+        add("  openQuestions = ${result.taskState.openQuestions.ifEmpty { listOf("<пусто>") }.joinToString()}")
+        add("  lastUserIntent = ${result.taskState.lastUserIntent ?: "<пусто>"}")
+    }.joinToString(separator = System.lineSeparator())
+
+    private fun chatHistoryText(result: ChatHistoryViewResult): String = buildList {
+        add("История сессии:")
+        if (result.messages.isEmpty()) {
+            add("  <пусто>")
+        } else {
+            result.messages.forEach { message ->
+                add("  [${message.turnId}] ${message.role.name.lowercase()} = ${previewText(message.text)}")
+            }
+        }
     }.joinToString(separator = System.lineSeparator())
 
     private fun postModeUpdateText(result: PostModeUpdateResult): String = buildList {

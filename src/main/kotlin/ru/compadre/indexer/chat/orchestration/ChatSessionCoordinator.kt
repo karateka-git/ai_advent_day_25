@@ -16,7 +16,18 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Координирует один chat-ход поверх истории, памяти задачи и grounded answer.
+ * Координирует один ход chat-сессии поверх истории сообщений, памяти задачи и ответа по найденному контексту.
+ *
+ * @param chatSessionStore хранилище текущих chat-сессий и их актуального состояния.
+ * @param taskStateUpdateService сервис обновления компактной памяти задачи по истории и новому пользовательскому ходу.
+ * @param retrievalQueryBuilder builder, который превращает пользовательское сообщение и `TaskState`
+ * в search-friendly запрос для retrieval либо явно сообщает, что retrieval нужно пропустить.
+ * @param groundedChatAnswerService сервис, который строит ответ с опорой на найденный retrieval-контекст.
+ * @param nowProvider поставщик текущего времени для timestamp-полей и детерминированных тестов.
+ * @param sessionIdProvider поставщик идентификаторов chat-сессий при создании новой сессии.
+ * @param requestIdProvider поставщик request id для вызова grounded answer и trace-сценариев.
+ * @param recentHistorySize количество последних сообщений, которое передаётся в update памяти
+ * и в chat-aware answer flow как recent history.
  */
 class ChatSessionCoordinator(
     private val chatSessionStore: ChatSessionStore,

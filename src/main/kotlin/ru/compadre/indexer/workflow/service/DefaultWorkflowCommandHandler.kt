@@ -27,6 +27,7 @@ import ru.compadre.indexer.trace.putInt
 import ru.compadre.indexer.trace.putString
 import ru.compadre.indexer.trace.tracePayload
 import ru.compadre.indexer.workflow.command.AskCommand
+import ru.compadre.indexer.workflow.command.ChatCommand
 import ru.compadre.indexer.workflow.command.CompareCommand
 import ru.compadre.indexer.workflow.command.HelpCommand
 import ru.compadre.indexer.workflow.command.IndexCommand
@@ -108,6 +109,10 @@ class DefaultWorkflowCommandHandler(
 
             is SetPostModeCommand -> throw IllegalArgumentException(
                 "Команда `set` должна обрабатываться на уровне CLI-сессии, а не workflow handler.",
+            )
+
+            is ChatCommand -> throw IllegalArgumentException(
+                "Команда `chat` должна обрабатываться на уровне CLI-сессии, а не workflow handler.",
             )
         }
 

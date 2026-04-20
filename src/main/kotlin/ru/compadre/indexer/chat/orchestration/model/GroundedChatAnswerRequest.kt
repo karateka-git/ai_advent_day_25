@@ -7,7 +7,7 @@ import ru.compadre.indexer.model.ChunkingStrategy
 import java.nio.file.Path
 
 /**
- * Входные данные для grounded answer в рамках одного chat-хода.
+ * Входные данные для ответа с опорой на найденный контекст в рамках одного chat-хода.
  */
 data class GroundedChatAnswerRequest(
     val requestId: String,

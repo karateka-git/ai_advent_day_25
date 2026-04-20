@@ -3,6 +3,7 @@ package ru.compadre.indexer.cli
 import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.search.model.PostRetrievalMode
 import ru.compadre.indexer.workflow.command.AskCommand
+import ru.compadre.indexer.workflow.command.ChatCommand
 import ru.compadre.indexer.workflow.command.CompareCommand
 import ru.compadre.indexer.workflow.command.HelpCommand
 import ru.compadre.indexer.workflow.command.IndexCommand
@@ -23,15 +24,32 @@ class DefaultCliCommandParser : CliCommandParser {
 
         return when (command) {
             "help" -> HelpCommand
+            "chat" -> parseChatCommand(args)
             "index" -> parseIndexCommand(args)
             "compare" -> parseCompareCommand(args)
             "ask" -> parseAskCommand(args)
             "search" -> parseSearchCommand(args)
             "set" -> parseSetCommand(args)
             else -> throw IllegalArgumentException(
-                "Неизвестная команда `$command`. Поддерживаемые команды: help, index, compare, ask, search, set.",
+                "Неизвестная команда `$command`. Поддерживаемые команды: help, chat, index, compare, ask, search, set.",
             )
         }
+    }
+
+    private fun parseChatCommand(args: Array<String>): WorkflowCommand {
+        val strategy = findOption(args, "--strategy")?.let { rawValue ->
+            ChunkingStrategy.fromCli(rawValue)
+                ?: throw IllegalArgumentException(
+                    "Для `chat --strategy` поддерживаются только значения `fixed` и `structured`.",
+                )
+        } ?: throw IllegalArgumentException("Для команды `chat` требуется опция `--strategy`.")
+        val topK = findIntOption(args, "--top")
+            ?: throw IllegalArgumentException("Для команды `chat` требуется опция `--top`.")
+
+        return ChatCommand(
+            strategy = strategy,
+            topK = topK,
+        )
     }
 
     private fun parseIndexCommand(args: Array<String>): WorkflowCommand {
