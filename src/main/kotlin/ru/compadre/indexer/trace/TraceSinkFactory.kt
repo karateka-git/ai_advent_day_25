@@ -4,7 +4,14 @@ import java.nio.file.Path
 
 object TraceSinkFactory {
     fun create(outputDir: String): TraceSink =
-        JsonlTraceSink(
-            outputPath = Path.of(outputDir).resolve("logs").resolve("rag-trace.jsonl"),
+        CompositeTraceSink(
+            sinks = listOf(
+                JsonlTraceSink(
+                    outputPath = Path.of(outputDir).resolve("logs").resolve("rag-trace.jsonl"),
+                ),
+                ReadableTraceSink(
+                    outputPath = Path.of(outputDir).resolve("logs").resolve("rag-trace-readable.md"),
+                ),
+            ),
         )
 }

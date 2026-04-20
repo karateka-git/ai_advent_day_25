@@ -14,10 +14,9 @@ import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.search.model.SearchMatch
 import ru.compadre.indexer.trace.NoOpTraceSink
 import ru.compadre.indexer.trace.TraceSink
-import ru.compadre.indexer.trace.chatMessagesTracePayload
 import ru.compadre.indexer.trace.emitRecord
 import ru.compadre.indexer.trace.jsonArrayOfStrings
-import ru.compadre.indexer.trace.searchMatchesTracePayload
+import ru.compadre.indexer.trace.llmRequestTracePayload
 import ru.compadre.indexer.trace.putBoolean
 import ru.compadre.indexer.trace.putDouble
 import ru.compadre.indexer.trace.putInt
@@ -132,28 +131,19 @@ class RagQuestionAnsweringService(
             kind = "answer_llm_prompt_built",
             stage = "rag.answer_llm_prompt",
             payload = tracePayload {
-                putString("question", question)
-                put("validChunkIds", jsonArrayOfStrings(selectedMatches.map { it.embeddedChunk.chunk.metadata.chunkId }))
-                put("contextChunks", searchMatchesTracePayload(selectedMatches, includeText = true))
-                putString("userPrompt", userPrompt)
-                put("messages", chatMessagesTracePayload(messages))
+                put("llmRequest", llmRequestTracePayload(config.llm, messages))
             },
         )
-        val llmStartedAt = System.nanoTime()
         val completion = llmClient.complete(
             config = config.llm,
             messages = messages,
         )
-        val llmDurationMs = (System.nanoTime() - llmStartedAt) / 1_000_000
         traceSink.emitRecord(
             requestId = requestId,
             kind = "answer_llm_completed",
             stage = "rag.answer_llm",
             payload = tracePayload {
-                putString("question", question)
-                put("selectedChunkIds", jsonArrayOfStrings(selectedMatches.map { it.embeddedChunk.chunk.metadata.chunkId }))
-                putDouble("durationMs", llmDurationMs.toDouble())
-                putString("rawCompletion", completion)
+                putString("llmResponse", completion)
             },
         )
         val parsedCompletion = parseModelCompletion(completion)
@@ -431,14 +421,14 @@ class RagQuestionAnsweringService(
     }
 
     private fun parseFailureAnswer(): String =
-        "РќРµ Р·РЅР°СЋ. РЈС‚РѕС‡РЅРёС‚Рµ РІРѕРїСЂРѕСЃ: РјРѕРґРµР»СЊ РІРµСЂРЅСѓР»Р° РЅРµРІР°Р»РёРґРЅС‹Р№ JSON РёР»Рё РїСѓСЃС‚РѕР№ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Р№ РѕС‚РІРµС‚."
+        "\u041d\u0435 \u0437\u043d\u0430\u044e. \u0423\u0442\u043e\u0447\u043d\u0438\u0442\u0435 \u0432\u043e\u043f\u0440\u043e\u0441: \u043c\u043e\u0434\u0435\u043b\u044c \u0432\u0435\u0440\u043d\u0443\u043b\u0430 \u043d\u0435\u0432\u0430\u043b\u0438\u0434\u043d\u044b\u0439 JSON \u0438\u043b\u0438 \u043f\u0443\u0441\u0442\u043e\u0439 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u0439 \u043e\u0442\u0432\u0435\u0442."
 
     private fun looksLikeRefusal(answer: String): Boolean {
         val normalized = answer.lowercase()
-        return normalized.contains("РЅРµ Р·РЅР°СЋ") ||
-            normalized.contains("СѓС‚РѕС‡РЅРёС‚Рµ РІРѕРїСЂРѕСЃ") ||
-            normalized.contains("РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР°РЅРЅС‹С…") ||
-            normalized.contains("РЅРµ РјРѕРіСѓ РѕС‚РІРµС‚РёС‚СЊ") ||
+        return normalized.contains("\u043d\u0435 \u0437\u043d\u0430\u044e") ||
+            normalized.contains("\u0443\u0442\u043e\u0447\u043d\u0438\u0442\u0435 \u0432\u043e\u043f\u0440\u043e\u0441") ||
+            normalized.contains("\u043d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u0434\u0430\u043d\u043d\u044b\u0445") ||
+            normalized.contains("\u043d\u0435 \u043c\u043e\u0433\u0443 \u043e\u0442\u0432\u0435\u0442\u0438\u0442\u044c") ||
             normalized.contains("insufficient context")
     }
 
@@ -485,16 +475,16 @@ class RagQuestionAnsweringService(
         private const val USER_ROLE = "user"
         private const val MAX_QUOTES = 1
         private const val REFUSAL_ANSWER =
-            "РќРµ Р·РЅР°СЋ. РЈС‚РѕС‡РЅРёС‚Рµ РІРѕРїСЂРѕСЃ: РІ РЅР°Р№РґРµРЅРЅРѕРј РєРѕРЅС‚РµРєСЃС‚Рµ РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР°РЅРЅС‹С… РґР»СЏ СѓРІРµСЂРµРЅРЅРѕРіРѕ РѕС‚РІРµС‚Р°."
+            "\u041d\u0435 \u0437\u043d\u0430\u044e. \u0423\u0442\u043e\u0447\u043d\u0438\u0442\u0435 \u0432\u043e\u043f\u0440\u043e\u0441: \u0432 \u043d\u0430\u0439\u0434\u0435\u043d\u043d\u043e\u043c \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442\u0435 \u043d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u0434\u0430\u043d\u043d\u044b\u0445 \u0434\u043b\u044f \u0443\u0432\u0435\u0440\u0435\u043d\u043d\u043e\u0433\u043e \u043e\u0442\u0432\u0435\u0442\u0430."
         private const val MISSING_QUOTES_ANSWER =
-            "РќРµ СѓРґР°Р»РѕСЃСЊ РЅР°РґС‘Р¶РЅРѕ РѕС‚РІРµС‚РёС‚СЊ РїРѕ РЅР°Р№РґРµРЅРЅРѕРјСѓ РєРѕРЅС‚РµРєСЃС‚Сѓ."
+            "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043d\u0430\u0434\u0451\u0436\u043d\u043e \u043e\u0442\u0432\u0435\u0442\u0438\u0442\u044c \u043f\u043e \u043d\u0430\u0439\u0434\u0435\u043d\u043d\u043e\u043c\u0443 \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442\u0443."
         private const val MISSING_QUOTES_WARNING =
-            "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґС‚РІРµСЂРґРёС‚СЊ СЌС‚РѕС‚ РѕС‚РІРµС‚ С†РёС‚Р°С‚РѕР№ РёР· РЅР°Р№РґРµРЅРЅРѕРіРѕ РєРѕРЅС‚РµРєСЃС‚Р°."
+            "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u043e\u0442\u0432\u0435\u0442 \u0446\u0438\u0442\u0430\u0442\u043e\u0439 \u0438\u0437 \u043d\u0430\u0439\u0434\u0435\u043d\u043d\u043e\u0433\u043e \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442\u0430."
         private val SYSTEM_PROMPT = """
-            You are a retrieval-grounded assistant.
-            Return exactly one JSON object and nothing else.
+            Ты ассистент, который отвечает только на основе найденного retrieval-контекста.
+            Верни ровно один JSON-объект и ничего больше.
 
-            Required schema:
+            Обязательная схема:
             {
               "answer": "string",
               "quotes": [
@@ -502,14 +492,14 @@ class RagQuestionAnsweringService(
               ]
             }
 
-            Rules:
-            - For a grounded answer, return exactly one quote.
-            - The quote must be a short direct excerpt from the provided context.
-            - The quote must reference an existing chunkId from the context.
-            - Pick the single best quote that most directly supports the answer.
-            - Answer in the same language as the question.
-            - Do not add markdown, code fences, explanations, or extra keys.
-            - If you cannot support the answer with one direct quote, return a refusal like "РќРµ Р·РЅР°СЋ. РЈС‚РѕС‡РЅРёС‚Рµ РІРѕРїСЂРѕСЃ: ..." and leave quotes empty.
+            Правила:
+            - Для grounded-ответа верни ровно одну цитату.
+            - Цитата должна быть коротким дословным фрагментом из переданного контекста.
+            - Цитата должна ссылаться на существующий chunkId из контекста.
+            - Выбери одну лучшую цитату, которая наиболее прямо подтверждает ответ.
+            - Отвечай на том же языке, что и вопрос пользователя.
+            - Не добавляй markdown, code fences, объяснения или лишние поля.
+            - Если не можешь подтвердить ответ одной прямой цитатой, верни отказ вида "\u041d\u0435 \u0437\u043d\u0430\u044e. \u0423\u0442\u043e\u0447\u043d\u0438\u0442\u0435 \u0432\u043e\u043f\u0440\u043e\u0441: ..." и оставь quotes пустым.
         """.trimIndent()
     }
 

@@ -1,9 +1,14 @@
 package ru.compadre.indexer.trace
 
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 import ru.compadre.indexer.config.AppConfig
+import ru.compadre.indexer.config.LlmSection
+import ru.compadre.indexer.llm.model.ChatCompletionRequest
 import ru.compadre.indexer.llm.model.ChatMessage
 import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.search.model.RetrievalCandidate
@@ -128,6 +133,32 @@ fun chatMessagesTracePayload(messages: List<ChatMessage>) = buildJsonArray {
     messages.forEach { add(chatMessageTracePayload(it)) }
 }
 
+fun llmRequestTracePayload(
+    config: LlmSection,
+    messages: List<ChatMessage>,
+): JsonObject =
+    traceJson.encodeToJsonElement(
+        ChatCompletionRequest(
+            model = config.model,
+            messages = messages,
+            temperature = config.temperature,
+            maxTokens = config.maxTokens,
+        ),
+    ) as JsonObject
+
+fun llmRequestTraceBody(
+    config: LlmSection,
+    messages: List<ChatMessage>,
+): String =
+    traceJson.encodeToString(
+        ChatCompletionRequest(
+            model = config.model,
+            messages = messages,
+            temperature = config.temperature,
+            maxTokens = config.maxTokens,
+        ),
+    )
+
 fun searchMatchesTracePayload(
     matches: List<SearchMatch>,
     includeText: Boolean = false,
@@ -142,3 +173,5 @@ fun searchMatchesTracePayload(
         )
     }
 }
+
+private val traceJson = Json { encodeDefaults = true }

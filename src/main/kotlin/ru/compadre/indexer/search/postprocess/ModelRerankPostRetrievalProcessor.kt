@@ -9,11 +9,8 @@ import ru.compadre.indexer.search.model.SearchMatch
 import ru.compadre.indexer.trace.NoOpTraceSink
 import ru.compadre.indexer.trace.TraceSink
 import ru.compadre.indexer.trace.emitRecord
-import ru.compadre.indexer.trace.chatMessagesTracePayload
-import ru.compadre.indexer.trace.putBoolean
-import ru.compadre.indexer.trace.putDouble
+import ru.compadre.indexer.trace.llmRequestTracePayload
 import ru.compadre.indexer.trace.putString
-import ru.compadre.indexer.trace.chunkTracePayload
 import ru.compadre.indexer.trace.tracePayload
 
 /**
@@ -47,36 +44,19 @@ class ModelRerankPostRetrievalProcessor(
                 kind = "model_rerank_prompt_built",
                 stage = "retrieval.model_rerank_prompt",
                 payload = tracePayload {
-                    putString("query", request.query)
-                    putString("chunkId", chunk.metadata.chunkId)
-                    putString("title", chunk.metadata.title)
-                    putString("section", chunk.metadata.section)
-                    putDouble("cosineScore", match.score)
-                    put("chunk", chunkTracePayload(chunk, includeText = true))
-                    put("messages", chatMessagesTracePayload(prompt.messages))
-                    putString("inputText", prompt.messages.lastOrNull()?.content)
+                    put("llmRequest", llmRequestTracePayload(prompt.config, prompt.messages))
                 },
             )
-            val startedAt = System.nanoTime()
             val evaluation = modelRerankJudge.score(
                 prompt = prompt,
                 fallbackCosineScore = match.score,
             )
-            val durationMs = (System.nanoTime() - startedAt) / 1_000_000
             traceSink.emitRecord(
                 requestId = request.requestId,
                 kind = "model_rerank_scored",
                 stage = "retrieval.model_rerank",
                 payload = tracePayload {
-                    putString("query", request.query)
-                    putString("chunkId", chunk.metadata.chunkId)
-                    putString("title", chunk.metadata.title)
-                    putString("section", chunk.metadata.section)
-                    putDouble("cosineScore", match.score)
-                    putDouble("modelScore", evaluation.score)
-                    putDouble("durationMs", durationMs.toDouble())
-                    putBoolean("usedFallback", evaluation.usedFallback)
-                    putString("rawResponse", evaluation.rawResponse)
+                    putString("llmResponse", evaluation.rawResponse)
                 },
             )
 

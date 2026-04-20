@@ -59,13 +59,12 @@ class ModelRerankTraceTest {
 
         val promptRecord = traceSink.records.first { it.kind == "model_rerank_prompt_built" }
         assertEquals("req-rerank", promptRecord.requestId)
-        assertTrue(promptRecord.payload.containsKey("messages"))
-        assertEquals("who is there", (promptRecord.payload["query"] as JsonPrimitive).content)
+        assertTrue(promptRecord.payload.containsKey("llmRequest"))
 
         val scoreRecord = traceSink.records.first { it.kind == "model_rerank_scored" }
         assertEquals("req-rerank", scoreRecord.requestId)
-        assertTrue(scoreRecord.payload.containsKey("durationMs"))
-        assertEquals("8.8", (scoreRecord.payload["modelScore"] as JsonPrimitive).content)
+        assertTrue(scoreRecord.payload.containsKey("llmResponse"))
+        assertEquals("""{"score":8.8}""", (scoreRecord.payload["llmResponse"] as JsonPrimitive).content)
     }
 
     private fun sampleMatch(): SearchMatch {
