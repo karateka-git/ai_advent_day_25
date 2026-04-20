@@ -3,6 +3,7 @@ package ru.compadre.indexer.chat.orchestration
 import ru.compadre.indexer.chat.memory.model.ChatTurnType
 import ru.compadre.indexer.chat.memory.TaskStateUpdateService
 import ru.compadre.indexer.chat.model.FixedTerm
+import ru.compadre.indexer.chat.model.ChatSession
 import ru.compadre.indexer.chat.model.TaskState
 import ru.compadre.indexer.chat.retrieval.RetrievalQueryBuilder
 import ru.compadre.indexer.chat.retrieval.model.RetrievalAction
@@ -21,6 +22,7 @@ import ru.compadre.indexer.llm.ChatCompletionClient
 import ru.compadre.indexer.llm.model.ChatMessage
 import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.qa.model.RagAnswer
+import ru.compadre.indexer.qa.model.RagSource
 import ru.compadre.indexer.search.model.PostRetrievalMode
 import ru.compadre.indexer.search.model.RetrievalPipelineResult
 import ru.compadre.indexer.trace.TraceRecord
@@ -62,6 +64,7 @@ class ChatSessionCoordinatorTest {
             ),
             retrievalQueryBuilder = RetrievalQueryBuilder(),
             groundedChatAnswerService = answerService,
+            answerRewriteService = FakeAnswerRewriteService(),
             traceSink = RecordingTraceSink(),
             nowProvider = { Instant.parse("2026-04-20T13:00:00Z") },
             sessionIdProvider = { "session-1" },
@@ -118,6 +121,7 @@ class ChatSessionCoordinatorTest {
             ),
             retrievalQueryBuilder = RetrievalQueryBuilder(),
             groundedChatAnswerService = answerService,
+            answerRewriteService = FakeAnswerRewriteService(),
             traceSink = RecordingTraceSink(),
             nowProvider = { Instant.parse("2026-04-20T13:10:00Z") },
             sessionIdProvider = { "session-2" },
@@ -172,6 +176,7 @@ class ChatSessionCoordinatorTest {
                     retrievalResult = emptyRetrievalResult(),
                 ),
             ),
+            answerRewriteService = FakeAnswerRewriteService(),
             traceSink = traceSink,
             nowProvider = { Instant.parse("2026-04-20T13:20:00Z") },
             sessionIdProvider = { "session-trace" },
@@ -225,6 +230,7 @@ class ChatSessionCoordinatorTest {
             ),
             retrievalQueryBuilder = RetrievalQueryBuilder(),
             groundedChatAnswerService = answerService,
+            answerRewriteService = FakeAnswerRewriteService(),
             traceSink = RecordingTraceSink(),
             nowProvider = { Instant.parse("2026-04-20T13:30:00Z") },
             sessionIdProvider = { "session-routing" },
@@ -245,6 +251,85 @@ class ChatSessionCoordinatorTest {
         assertEquals(RetrievalSkipReason.TASK_STATE_UPDATE_ONLY, result.retrievalQuery.skipReason)
         assertNull(result.ragAnswer)
         assertNull(answerService.lastRequest)
+    }
+
+    @Test
+    fun `handle user turn rewrites last grounded answer without retrieval`() {
+        val store = InMemoryChatSessionStore(nowProvider = { Instant.parse("2026-04-20T13:40:00Z") })
+        val existingSession = store.create("session-rewrite")
+        store.save(
+            existingSession.copy(
+                taskState = TaskState(goal = "Обсуждать текст «Реформа»"),
+                lastGroundedAnswer = RagAnswer(
+                    answer = "Богиня Реформа родилась на берегах Ганга и показана как прекрасная и свободная.",
+                    sources = listOf(
+                        RagSource(
+                            source = "reforma.txt",
+                            section = "reforma",
+                            chunkId = "reforma#2",
+                        ),
+                    ),
+                    retrievalResult = emptyRetrievalResult(),
+                ),
+            ),
+        )
+        val answerService = FakeGroundedChatAnswerService(
+            ragAnswer = RagAnswer(
+                answer = "unused",
+                retrievalResult = emptyRetrievalResult(),
+            ),
+        )
+        val rewriteService = FakeAnswerRewriteService(
+            rewrittenAnswer = "Богиня Реформа родилась на берегах Ганга и описана как прекрасная и свободная.",
+        )
+        val coordinator = ChatSessionCoordinator(
+            chatSessionStore = store,
+            taskStateUpdateService = TaskStateUpdateService(
+                llmClient = FakeChatCompletionClient(
+                    """
+                    {
+                      "turnType": "answer_rewrite",
+                      "goal": "Обсуждать текст «Реформа»",
+                      "constraints": ["Обсуждать только текст «Реформа»"],
+                      "fixedTerms": [],
+                      "knownFacts": [],
+                      "openQuestions": [],
+                      "lastUserIntent": "Сделать ответ короче"
+                    }
+                    """.trimIndent(),
+                ),
+            ),
+            retrievalQueryBuilder = RetrievalQueryBuilder(),
+            groundedChatAnswerService = answerService,
+            answerRewriteService = rewriteService,
+            traceSink = RecordingTraceSink(),
+            nowProvider = { Instant.parse("2026-04-20T13:40:00Z") },
+            requestIdProvider = { "request-rewrite" },
+        )
+
+        val result = runSuspend {
+            coordinator.handleUserTurn(
+                sessionId = "session-rewrite",
+                userMessage = "Коротко, в 2-3 предложениях.",
+                config = testConfig(),
+                strategy = ChunkingStrategy.STRUCTURED,
+            )
+        }
+
+        assertEquals(ChatTurnType.ANSWER_REWRITE, result.turnType)
+        assertEquals(RetrievalAction.SKIPPED, result.retrievalQuery.action)
+        assertEquals(RetrievalSkipReason.ANSWER_REWRITE_REUSE, result.retrievalQuery.skipReason)
+        assertEquals(
+            "Богиня Реформа родилась на берегах Ганга и описана как прекрасная и свободная.",
+            result.ragAnswer?.answer,
+        )
+        assertEquals("reforma.txt", result.ragAnswer?.sources?.single()?.source)
+        assertEquals("Коротко, в 2-3 предложениях.", rewriteService.lastRequest?.userMessage)
+        assertNull(answerService.lastRequest)
+        assertEquals(
+            "Богиня Реформа родилась на берегах Ганга и описана как прекрасная и свободная.",
+            result.session.lastGroundedAnswer?.answer,
+        )
     }
 
     private fun testConfig(): AppConfig =
@@ -320,6 +405,17 @@ class ChatSessionCoordinatorTest {
         override suspend fun answer(request: ru.compadre.indexer.chat.orchestration.model.GroundedChatAnswerRequest): RagAnswer {
             lastRequest = request
             return ragAnswer
+        }
+    }
+
+    private class FakeAnswerRewriteService(
+        private val rewrittenAnswer: String? = null,
+    ) : AnswerRewriteService {
+        var lastRequest: ru.compadre.indexer.chat.orchestration.model.AnswerRewriteRequest? = null
+
+        override suspend fun rewrite(request: ru.compadre.indexer.chat.orchestration.model.AnswerRewriteRequest): String? {
+            lastRequest = request
+            return rewrittenAnswer
         }
     }
 

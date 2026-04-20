@@ -2,6 +2,7 @@ package ru.compadre.indexer
 
 import kotlinx.coroutines.runBlocking
 import ru.compadre.indexer.chat.memory.TaskStateUpdateService
+import ru.compadre.indexer.chat.orchestration.LlmAnswerRewriteService
 import ru.compadre.indexer.chat.orchestration.ChatSessionCoordinator
 import ru.compadre.indexer.chat.orchestration.RagGroundedChatAnswerService
 import ru.compadre.indexer.chat.retrieval.RetrievalQueryBuilder
@@ -374,6 +375,7 @@ private fun createChatSessionCoordinator(traceSink: TraceSink): ChatSessionCoord
         taskStateUpdateService = TaskStateUpdateService(traceSink = traceSink),
         retrievalQueryBuilder = RetrievalQueryBuilder(),
         groundedChatAnswerService = RagGroundedChatAnswerService(ragQuestionAnsweringService),
+        answerRewriteService = LlmAnswerRewriteService(),
         traceSink = traceSink,
     )
 }

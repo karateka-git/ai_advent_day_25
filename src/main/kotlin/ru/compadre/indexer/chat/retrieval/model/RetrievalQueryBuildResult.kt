@@ -14,6 +14,7 @@ enum class RetrievalAction {
 enum class RetrievalSkipReason {
     SHORT_SERVICE_TURN,
     TASK_STATE_UPDATE_ONLY,
+    ANSWER_REWRITE_REUSE,
 }
 
 /**

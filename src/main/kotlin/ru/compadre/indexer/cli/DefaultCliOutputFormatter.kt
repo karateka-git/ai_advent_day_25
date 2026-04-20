@@ -80,6 +80,19 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
             ru.compadre.indexer.chat.retrieval.model.RetrievalAction.SKIPPED -> {
                 add("Retrieval пропущен.")
                 add("Причина: ${result.retrievalQuery.skipReason}")
+                result.ragAnswer?.let { ragAnswer ->
+                    add("")
+                    add("Ответ:")
+                    add(ragAnswer.answer)
+                    if (ragAnswer.sources.isNotEmpty()) {
+                        add("")
+                        addAll(sourcesLines(ragAnswer))
+                    }
+                    quotesLines(ragAnswer)?.let { quoteLines ->
+                        add("")
+                        addAll(quoteLines)
+                    }
+                }
             }
 
             ru.compadre.indexer.chat.retrieval.model.RetrievalAction.PERFORMED -> {

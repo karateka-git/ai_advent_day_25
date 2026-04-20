@@ -7,6 +7,7 @@ import ru.compadre.indexer.chat.model.ChatRole
 import ru.compadre.indexer.chat.model.ChatSession
 import ru.compadre.indexer.chat.model.TaskState
 import ru.compadre.indexer.chat.orchestration.model.ChatTurnResult
+import ru.compadre.indexer.chat.orchestration.model.AnswerRewriteRequest
 import ru.compadre.indexer.chat.orchestration.model.GroundedChatAnswerRequest
 import ru.compadre.indexer.chat.retrieval.RetrievalQueryBuilder
 import ru.compadre.indexer.chat.retrieval.model.RetrievalAction
@@ -46,6 +47,7 @@ class ChatSessionCoordinator(
     private val taskStateUpdateService: TaskStateUpdateService,
     private val retrievalQueryBuilder: RetrievalQueryBuilder,
     private val groundedChatAnswerService: GroundedChatAnswerService,
+    private val answerRewriteService: AnswerRewriteService,
     private val traceSink: TraceSink = NoOpTraceSink,
     private val nowProvider: () -> Instant = Instant::now,
     private val sessionIdProvider: () -> String = { UUID.randomUUID().toString() },
@@ -120,6 +122,18 @@ class ChatSessionCoordinator(
                 put("taskState", taskStateTracePayload(updatedTaskState))
             },
         )
+
+        if (turnType == ChatTurnType.ANSWER_REWRITE && sessionAfterUserTurn.lastGroundedAnswer != null) {
+            val rewriteResult = handleAnswerRewrite(
+                requestId = requestId,
+                userMessageRecord = userMessageRecord,
+                sessionAfterUserTurn = sessionAfterUserTurn,
+                retrievalQuery = skippedRetrieval(RetrievalSkipReason.ANSWER_REWRITE_REUSE),
+                userMessage = userMessage,
+                config = config,
+            )
+            return rewriteResult
+        }
 
         if (retrievalQuery.action == RetrievalAction.SKIPPED) {
             val storedSession = chatSessionStore.save(sessionAfterUserTurn)
@@ -234,6 +248,76 @@ class ChatSessionCoordinator(
                     recentHistory = recentHistory,
                 )
         }
+
+    private suspend fun handleAnswerRewrite(
+        requestId: String,
+        userMessageRecord: ChatMessageRecord,
+        sessionAfterUserTurn: ChatSession,
+        retrievalQuery: ru.compadre.indexer.chat.retrieval.model.RetrievalQueryBuildResult,
+        userMessage: String,
+        config: AppConfig,
+    ): ChatTurnResult {
+        val lastGroundedAnswer = checkNotNull(sessionAfterUserTurn.lastGroundedAnswer)
+        val rewrittenAnswerText = answerRewriteService.rewrite(
+            AnswerRewriteRequest(
+                requestId = requestId,
+                userMessage = userMessage,
+                recentHistory = sessionAfterUserTurn.messages.takeLast(recentHistorySize),
+                taskState = sessionAfterUserTurn.taskState,
+                lastGroundedAnswer = lastGroundedAnswer,
+                config = config.llm,
+            ),
+        ) ?: lastGroundedAnswer.answer
+        val rewrittenRagAnswer = lastGroundedAnswer.copy(answer = rewrittenAnswerText)
+        val assistantTimestamp = nowProvider()
+        val assistantMessageRecord = ChatMessageRecord(
+            turnId = sessionAfterUserTurn.messages.nextTurnId(),
+            role = ChatRole.ASSISTANT,
+            text = rewrittenAnswerText,
+            timestamp = assistantTimestamp,
+        )
+        val finalSession = chatSessionStore.save(
+            sessionAfterUserTurn.copy(
+                messages = sessionAfterUserTurn.messages + assistantMessageRecord,
+                lastGroundedAnswer = rewrittenRagAnswer,
+                updatedAt = assistantTimestamp,
+            ),
+        )
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "answer_rewrite_completed",
+            stage = "chat.answer_rewrite",
+            payload = tracePayload {
+                putString("sessionId", finalSession.sessionId)
+                putInt("turnId", userMessageRecord.turnId)
+                putString("turnType", ChatTurnType.ANSWER_REWRITE.name)
+                putString("assistantAnswer", assistantMessageRecord.text)
+            },
+        )
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "chat_turn_completed",
+            stage = "chat.turn_result",
+            payload = tracePayload {
+                putString("sessionId", finalSession.sessionId)
+                putInt("turnId", userMessageRecord.turnId)
+                putString("turnType", ChatTurnType.ANSWER_REWRITE.name)
+                putBoolean("hasAssistantMessage", true)
+                putBoolean("hasRagAnswer", true)
+                putString("assistantAnswer", assistantMessageRecord.text)
+                put("taskState", taskStateTracePayload(finalSession.taskState))
+            },
+        )
+
+        return ChatTurnResult(
+            session = finalSession,
+            turnType = ChatTurnType.ANSWER_REWRITE,
+            userMessageRecord = userMessageRecord,
+            assistantMessageRecord = assistantMessageRecord,
+            retrievalQuery = retrievalQuery,
+            ragAnswer = rewrittenRagAnswer,
+        )
+    }
 
     private fun skippedRetrieval(
         reason: RetrievalSkipReason,
