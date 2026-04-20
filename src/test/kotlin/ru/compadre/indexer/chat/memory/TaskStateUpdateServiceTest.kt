@@ -5,6 +5,8 @@ import ru.compadre.indexer.chat.model.ChatRole
 import ru.compadre.indexer.chat.model.FixedTerm
 import ru.compadre.indexer.chat.model.TaskState
 import ru.compadre.indexer.config.LlmSection
+import ru.compadre.indexer.llm.ChatCompletionClient
+import ru.compadre.indexer.llm.model.ChatMessage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import java.time.Instant
@@ -82,7 +84,7 @@ class TaskStateUpdateServiceTest {
             lastUserIntent = "Продолжить обсуждение архитектуры",
         )
         val service = TaskStateUpdateService(
-            completionProvider = { _, _, _ -> "not a json payload" },
+            llmClient = FakeChatCompletionClient("not a json payload"),
         )
 
         val updatedState = service.update(
@@ -105,7 +107,7 @@ class TaskStateUpdateServiceTest {
     @Test
     fun `update uses parsed snapshot when llm returns valid json`() {
         val service = TaskStateUpdateService(
-            completionProvider = { _, _, _ ->
+            llmClient = FakeChatCompletionClient(
                 """
                 {
                   "goal": "Сделать mini-chat с RAG",
@@ -117,8 +119,8 @@ class TaskStateUpdateServiceTest {
                   "openQuestions": ["Нужен ли file-based store"],
                   "lastUserIntent": "Обновить память задачи"
                 }
-                """.trimIndent()
-            },
+                """.trimIndent(),
+            ),
         )
 
         val updatedState = service.update(
@@ -144,6 +146,15 @@ class TaskStateUpdateServiceTest {
             ),
             updatedState,
         )
+    }
+
+    private class FakeChatCompletionClient(
+        private val completion: String,
+    ) : ChatCompletionClient {
+        override fun complete(
+            config: LlmSection,
+            messages: List<ChatMessage>,
+        ): String = completion
     }
 
     private fun testConfig(): LlmSection =

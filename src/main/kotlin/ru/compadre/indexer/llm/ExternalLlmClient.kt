@@ -18,7 +18,8 @@ import java.nio.charset.StandardCharsets
 class ExternalLlmClient(
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
     private val json: Json = Json { ignoreUnknownKeys = true },
-) {
+) : ChatCompletionClient {
+    override
     fun complete(
         config: LlmSection,
         messages: List<ChatMessage>,

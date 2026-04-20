@@ -7,6 +7,7 @@ import ru.compadre.indexer.chat.model.ChatRole
 import ru.compadre.indexer.chat.model.FixedTerm
 import ru.compadre.indexer.chat.model.TaskState
 import ru.compadre.indexer.config.LlmSection
+import ru.compadre.indexer.llm.ChatCompletionClient
 import ru.compadre.indexer.llm.ExternalLlmClient
 import ru.compadre.indexer.llm.model.ChatMessage
 
@@ -14,13 +15,11 @@ import ru.compadre.indexer.llm.model.ChatMessage
  * Обновляет компактную память задачи по предыдущему состоянию и новым сообщениям диалога.
  */
 class TaskStateUpdateService(
-    private val llmClient: ExternalLlmClient = ExternalLlmClient(),
+    private val llmClient: ChatCompletionClient = ExternalLlmClient(),
     private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     },
-    private val completionProvider: (ExternalLlmClient, LlmSection, List<ChatMessage>) -> String =
-        { client, config, messages -> client.complete(config, messages) },
 ) {
     /**
      * Пытается обновить `TaskState` через отдельный LLM-step.
@@ -42,7 +41,7 @@ class TaskStateUpdateService(
             recentHistory = recentHistory,
             userMessage = userMessage,
         )
-        val completion = completionProvider(llmClient, config, messages)
+        val completion = llmClient.complete(config, messages)
 
         return parseModelCompletion(completion) ?: previousTaskState
     }
