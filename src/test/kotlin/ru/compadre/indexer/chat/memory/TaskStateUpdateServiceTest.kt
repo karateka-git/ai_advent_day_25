@@ -150,6 +150,62 @@ class TaskStateUpdateServiceTest {
         )
     }
 
+    @Test
+    fun `update preserves previous goal when valid snapshot omits it`() {
+        val service = TaskStateUpdateService(
+            llmClient = FakeChatCompletionClient(
+                """
+                {
+                  "goal": null,
+                  "constraints": ["Отвечать только по нему"],
+                  "fixedTerms": [],
+                  "knownFacts": [],
+                  "openQuestions": [],
+                  "lastUserIntent": "Уточнить детали"
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val updatedState = service.update(
+            requestId = "request-3",
+            previousTaskState = TaskState(goal = "Обсуждать текст «Реформа»"),
+            recentHistory = emptyList(),
+            userMessage = "А как там показана сама Реформа?",
+            config = testConfig(),
+        )
+
+        assertEquals("Обсуждать текст «Реформа»", updatedState.goal)
+    }
+
+    @Test
+    fun `update infers goal from framing user message when snapshot omits it`() {
+        val service = TaskStateUpdateService(
+            llmClient = FakeChatCompletionClient(
+                """
+                {
+                  "goal": null,
+                  "constraints": ["Обсуждать только текст «Реформа»"],
+                  "fixedTerms": [],
+                  "knownFacts": [],
+                  "openQuestions": [],
+                  "lastUserIntent": "Зафиксировать рамку диалога"
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val updatedState = service.update(
+            requestId = "request-4",
+            previousTaskState = TaskState(),
+            recentHistory = emptyList(),
+            userMessage = "Будем обсуждать только текст «Реформа». Отвечай только по нему.",
+            config = testConfig(),
+        )
+
+        assertEquals("Обсуждать текст «Реформа»", updatedState.goal)
+    }
+
     private class FakeChatCompletionClient(
         private val completion: String,
     ) : ChatCompletionClient {

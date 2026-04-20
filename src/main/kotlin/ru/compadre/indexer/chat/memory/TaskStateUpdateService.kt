@@ -52,7 +52,13 @@ class TaskStateUpdateService(
             userMessage = userMessage,
         )
         val completion = llmClient.complete(config, messages)
-        val updatedTaskState = parseModelCompletion(completion) ?: previousTaskState
+        val parsedTaskState = parseModelCompletion(completion)
+        val updatedTaskState = parsedTaskState
+            ?.stabilize(
+                previousTaskState = previousTaskState,
+                userMessage = userMessage,
+            )
+            ?: previousTaskState
         val appliedFallback = updatedTaskState == previousTaskState
 
         traceSink.emitRecord(
@@ -190,6 +196,21 @@ class TaskStateUpdateService(
             openQuestions.isNotEmpty() ||
             lastUserIntent != null
 
+    private fun TaskState.stabilize(
+        previousTaskState: TaskState,
+        userMessage: String,
+    ): TaskState {
+        val inferredGoal = inferGoalFromUserMessage(userMessage)
+        return copy(
+            goal = inferredGoal ?: goal ?: previousTaskState.goal,
+        )
+    }
+
+    private fun inferGoalFromUserMessage(userMessage: String): String? =
+        GOAL_TEXT_REGEX.find(userMessage)?.groupValues?.get(1)?.trim()?.takeIf(String::isNotBlank)?.let { title ->
+            "Обсуждать текст «$title»"
+        }
+
     private fun List<String>.normalizeValues(limit: Int): List<String> =
         mapNotNull { value -> value.normalizeSingleValue() }
             .distinct()
@@ -212,6 +233,8 @@ class TaskStateUpdateService(
         private const val MAX_FIXED_TERMS = 8
         private const val MAX_KNOWN_FACTS = 8
         private const val MAX_OPEN_QUESTIONS = 8
+        private val GOAL_TEXT_REGEX =
+            Regex("""(?:обсуждать|обсуждаем)\s+(?:не\s+)?(?:только\s+)?текст\s+[«"]([^»"]+)[»"]""", RegexOption.IGNORE_CASE)
         private val SYSTEM_PROMPT = """
             Ты обновляешь компактную память задачи для chat-сессии.
             Верни ровно один JSON-объект и ничего больше.
