@@ -1,7 +1,6 @@
 package ru.compadre.indexer.search
 
 import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import ru.compadre.indexer.config.AppConfig
 import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.search.model.PostRetrievalMode
@@ -16,9 +15,10 @@ import ru.compadre.indexer.search.postprocess.ThresholdPostRetrievalProcessor
 import ru.compadre.indexer.trace.NoOpTraceSink
 import ru.compadre.indexer.trace.TraceSink
 import ru.compadre.indexer.trace.emitRecord
-import ru.compadre.indexer.trace.putDouble
 import ru.compadre.indexer.trace.putInt
 import ru.compadre.indexer.trace.putString
+import ru.compadre.indexer.trace.retrievalCandidateTracePayload
+import ru.compadre.indexer.trace.searchMatchTracePayload
 import ru.compadre.indexer.trace.tracePayload
 import java.nio.file.Path
 
@@ -71,17 +71,7 @@ class RetrievalPipelineService(
                     "candidates",
                     buildJsonArray {
                         matches.forEachIndexed { index, match ->
-                            val chunk = match.embeddedChunk.chunk
-                            add(
-                                buildJsonObject {
-                                    putString("chunkId", chunk.metadata.chunkId)
-                                    putString("title", chunk.metadata.title)
-                                    putString("section", chunk.metadata.section)
-                                    putString("filePath", chunk.metadata.filePath)
-                                    putDouble("cosineScore", match.score)
-                                    putInt("initialRank", index + 1)
-                                },
-                            )
+                            add(searchMatchTracePayload(match, initialRank = index + 1))
                         }
                     },
                 )
@@ -141,15 +131,7 @@ class RetrievalPipelineService(
                     "selectedMatches",
                     buildJsonArray {
                         retrievalResult.selectedCandidates.forEach { candidate ->
-                            val chunk = candidate.match.embeddedChunk.chunk
-                            add(
-                                buildJsonObject {
-                                    putString("chunkId", chunk.metadata.chunkId)
-                                    putDouble("cosineScore", candidate.cosineScore)
-                                    putInt("finalRank", candidate.finalRank)
-                                    putString("postProcessingMode", mode.configValue)
-                                },
-                            )
+                            add(retrievalCandidateTracePayload(candidate, postProcessingMode = mode.configValue))
                         }
                     },
                 )

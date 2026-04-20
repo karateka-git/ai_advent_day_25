@@ -19,6 +19,9 @@ import ru.compadre.indexer.storage.IndexStore
 import ru.compadre.indexer.storage.SqliteIndexStore
 import ru.compadre.indexer.trace.NoOpTraceSink
 import ru.compadre.indexer.trace.TraceSink
+import ru.compadre.indexer.trace.commandResultTracePayload
+import ru.compadre.indexer.trace.commandTracePayload
+import ru.compadre.indexer.trace.commandTraceType
 import ru.compadre.indexer.trace.emitRecord
 import ru.compadre.indexer.trace.putInt
 import ru.compadre.indexer.trace.putString
@@ -61,12 +64,12 @@ class DefaultWorkflowCommandHandler(
     ),
 ) : WorkflowCommandHandler {
     override suspend fun handle(command: WorkflowCommand, config: AppConfig): CommandResult {
-        val requestId = newRequestId(commandTracePrefix(command))
+        val requestId = newRequestId(commandTraceType(command))
         traceSink.emitRecord(
             requestId = requestId,
             kind = "command_started",
             stage = "workflow.command",
-            payload = buildCommandStartedPayload(command, config),
+            payload = commandTracePayload(command, config),
         )
 
         val result = when (command) {
@@ -112,7 +115,7 @@ class DefaultWorkflowCommandHandler(
             requestId = requestId,
             kind = "command_completed",
             stage = "workflow.command",
-            payload = buildCommandCompletedPayload(command, result),
+            payload = commandResultTracePayload(command, result),
         )
 
         return result
@@ -395,58 +398,6 @@ class DefaultWorkflowCommandHandler(
     }
 
     private fun newRequestId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
-
-    private fun commandTracePrefix(command: WorkflowCommand): String =
-        when (command) {
-            is AskCommand -> "ask"
-            is SearchCommand -> "search"
-            is IndexCommand -> "index"
-            is CompareCommand -> "compare"
-            HelpCommand -> "help"
-            is SetPostModeCommand -> "set"
-        }
-
-    private fun buildCommandStartedPayload(
-        command: WorkflowCommand,
-        config: AppConfig,
-    ) = tracePayload {
-        putString("commandType", commandTracePrefix(command))
-        when (command) {
-            is AskCommand -> {
-                putString("query", command.query)
-                putString("mode", command.mode)
-                putString("strategy", command.strategy?.id)
-                putInt("topK", command.topK)
-                putString("postMode", command.postMode ?: config.search.postProcessingMode)
-            }
-
-            is SearchCommand -> {
-                putString("query", command.query)
-                putString("strategy", command.strategy?.id)
-                putInt("topK", command.topK)
-                putString("postMode", command.postMode ?: config.search.postProcessingMode)
-            }
-
-            is IndexCommand -> {
-                putString("inputDir", command.inputDir ?: config.app.inputDir)
-                putString("strategy", command.strategy?.id)
-                putString("allStrategies", command.allStrategies.toString())
-            }
-
-            is CompareCommand -> putString("inputDir", command.inputDir ?: config.app.inputDir)
-            HelpCommand -> putString("postMode", config.search.postProcessingMode)
-            is SetPostModeCommand -> putString("postMode", command.postMode)
-        }
-    }
-
-    private fun buildCommandCompletedPayload(
-        command: WorkflowCommand,
-        result: CommandResult,
-    ) = tracePayload {
-        putString("commandType", commandTracePrefix(command))
-        putString("resultKind", result::class.simpleName ?: "CommandResult")
-        putString("status", "success")
-    }
 
     private companion object {
         private const val EMBEDDING_PREVIEW_LIMIT = 3
