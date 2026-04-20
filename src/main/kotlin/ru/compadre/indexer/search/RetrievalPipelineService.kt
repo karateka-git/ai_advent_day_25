@@ -11,6 +11,8 @@ import ru.compadre.indexer.search.postprocess.ModelRerankPostRetrievalProcessor
 import ru.compadre.indexer.search.postprocess.NoOpPostRetrievalProcessor
 import ru.compadre.indexer.search.postprocess.PostRetrievalProcessor
 import ru.compadre.indexer.search.postprocess.ThresholdPostRetrievalProcessor
+import ru.compadre.indexer.trace.NoOpTraceSink
+import ru.compadre.indexer.trace.TraceSink
 import java.nio.file.Path
 
 /**
@@ -23,6 +25,7 @@ class RetrievalPipelineService(
     private val heuristicFilterPostRetrievalProcessor: PostRetrievalProcessor = HeuristicFilterPostRetrievalProcessor(),
     private val heuristicRerankPostRetrievalProcessor: PostRetrievalProcessor = HeuristicRerankPostRetrievalProcessor(),
     private val modelRerankPostRetrievalProcessor: PostRetrievalProcessor = ModelRerankPostRetrievalProcessor(),
+    private val traceSink: TraceSink = NoOpTraceSink,
 ) {
     /**
      * Выполняет retrieval и возвращает расширенный результат пайплайна.

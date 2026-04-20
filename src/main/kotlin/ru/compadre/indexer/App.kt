@@ -9,6 +9,7 @@ import ru.compadre.indexer.config.AppConfig
 import ru.compadre.indexer.config.AppConfigLoader
 import ru.compadre.indexer.workflow.command.AskCommand
 import ru.compadre.indexer.config.withPostProcessingMode
+import ru.compadre.indexer.trace.TraceSinkFactory
 import ru.compadre.indexer.workflow.command.HelpCommand
 import ru.compadre.indexer.workflow.command.SearchCommand
 import ru.compadre.indexer.workflow.command.SetPostModeCommand
@@ -32,7 +33,8 @@ fun main(args: Array<String>) = runBlocking {
     val baseConfig = AppConfigLoader.load()
     val parser: CliCommandParser = DefaultCliCommandParser()
     val formatter: CliOutputFormatter = DefaultCliOutputFormatter()
-    val commandHandler: WorkflowCommandHandler = DefaultWorkflowCommandHandler()
+    val traceSink = TraceSinkFactory.create(baseConfig.app.outputDir)
+    val commandHandler: WorkflowCommandHandler = DefaultWorkflowCommandHandler(traceSink = traceSink)
 
     if (args.isEmpty()) {
         runInteractiveShell(

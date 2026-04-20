@@ -17,6 +17,8 @@ import ru.compadre.indexer.search.BruteForceSearchEngine
 import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.storage.IndexStore
 import ru.compadre.indexer.storage.SqliteIndexStore
+import ru.compadre.indexer.trace.NoOpTraceSink
+import ru.compadre.indexer.trace.TraceSink
 import ru.compadre.indexer.workflow.command.AskCommand
 import ru.compadre.indexer.workflow.command.CompareCommand
 import ru.compadre.indexer.workflow.command.HelpCommand
@@ -38,14 +40,21 @@ import java.nio.file.Path
  * Стартовая реализация обработчика команд для этапов загрузки корпуса, chunking, embeddings и SQLite storage.
  */
 class DefaultWorkflowCommandHandler(
+    private val traceSink: TraceSink = NoOpTraceSink,
     private val documentLoader: DocumentLoader = DocumentLoader(),
     private val indexStore: IndexStore = SqliteIndexStore(),
     private val comparisonService: ChunkingComparisonService = ChunkingComparisonService(),
     private val comparisonReportWriter: MarkdownComparisonReportWriter = MarkdownComparisonReportWriter(),
     private val plainQuestionAnsweringService: PlainQuestionAnsweringService = PlainQuestionAnsweringService(),
     private val searchEngine: BruteForceSearchEngine = BruteForceSearchEngine(),
-    private val retrievalPipelineService: RetrievalPipelineService = RetrievalPipelineService(searchEngine),
-    private val ragQuestionAnsweringService: RagQuestionAnsweringService = RagQuestionAnsweringService(retrievalPipelineService),
+    private val retrievalPipelineService: RetrievalPipelineService = RetrievalPipelineService(
+        searchEngine = searchEngine,
+        traceSink = traceSink,
+    ),
+    private val ragQuestionAnsweringService: RagQuestionAnsweringService = RagQuestionAnsweringService(
+        retrievalPipelineService = retrievalPipelineService,
+        traceSink = traceSink,
+    ),
 ) : WorkflowCommandHandler {
     override suspend fun handle(command: WorkflowCommand, config: AppConfig): CommandResult = when (command) {
         HelpCommand -> HelpResult(

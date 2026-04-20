@@ -12,6 +12,8 @@ import ru.compadre.indexer.qa.model.RagQuote
 import ru.compadre.indexer.qa.model.RagSource
 import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.search.model.SearchMatch
+import ru.compadre.indexer.trace.NoOpTraceSink
+import ru.compadre.indexer.trace.TraceSink
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -23,6 +25,7 @@ import java.time.Instant
 class RagQuestionAnsweringService(
     private val retrievalPipelineService: RetrievalPipelineService,
     private val llmClient: ExternalLlmClient = ExternalLlmClient(),
+    private val traceSink: TraceSink = NoOpTraceSink,
     private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
