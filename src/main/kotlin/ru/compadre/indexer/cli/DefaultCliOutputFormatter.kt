@@ -83,7 +83,8 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
             }
 
             ru.compadre.indexer.chat.retrieval.model.RetrievalAction.PERFORMED -> {
-                result.ragAnswer?.let { ragAnswer ->
+                val ragAnswer = result.ragAnswer
+                if (ragAnswer != null) {
                     add("Ответ:")
                     add(ragAnswer.answer)
                     if (ragAnswer.isRefusal) {
@@ -102,7 +103,7 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
                         add("")
                         addAll(quoteLines)
                     }
-                } ?: run {
+                } else {
                     add("Ответ с опорой на контекст пока не получен.")
                 }
             }
