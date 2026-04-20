@@ -41,7 +41,7 @@ $stopWords = @(
 
 function Get-CliBatPath {
     param([string]$WorkingDirectory)
-    Join-Path $WorkingDirectory "build\install\ai_advent_day_24\bin\local-document-indexer.bat"
+    Join-Path $WorkingDirectory "build\install\ai_advent_day_25\bin\local-document-indexer.bat"
 }
 
 function Invoke-CliCommand {

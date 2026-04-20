@@ -11,7 +11,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 function Get-CliBatPath {
     param([Parameter(Mandatory = $true)][string]$ProjectRoot)
-    Join-Path $ProjectRoot "build\install\ai_advent_day_24\bin\local-document-indexer.bat"
+    Join-Path $ProjectRoot "build\install\ai_advent_day_25\bin\local-document-indexer.bat"
 }
 
 function Assert-LauncherExists {
