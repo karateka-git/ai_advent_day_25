@@ -37,6 +37,21 @@ function New-Utf8CmdArgumentList {
     )
 }
 
+function Clear-RagTraceLogs {
+    param([Parameter(Mandatory = $true)][string]$ProjectRoot)
+
+    $tracePaths = @(
+        (Join-Path $ProjectRoot "data\logs\rag-trace.jsonl"),
+        (Join-Path $ProjectRoot "data\logs\rag-trace-readable.md")
+    )
+
+    foreach ($tracePath in $tracePaths) {
+        if (Test-Path -LiteralPath $tracePath) {
+            Remove-Item -LiteralPath $tracePath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
@@ -49,6 +64,8 @@ if ($SkipBuild) {
         throw "Build failed with exit code $LASTEXITCODE."
     }
 }
+
+Clear-RagTraceLogs -ProjectRoot $projectRoot
 
 $cliBatPath = Get-CliBatPath -ProjectRoot $projectRoot
 Assert-LauncherExists -Path $cliBatPath -Description "Built CLI launcher"
