@@ -15,7 +15,7 @@ chat --strategy structured --top 3
 - прогонять реплики по порядку;
 - после ключевых ходов проверять `:memory`;
 - при необходимости смотреть `:history`;
-- фиксировать результат в отдельном markdown-артефакте по шаблону отчёта.
+- фиксировать результат в отдельном markdown-артефакте по шаблону из [chat-evaluation-report-template.md](/C:/Users/compadre/Downloads/Projects/AiAdvent/day_25/docs/chat-evaluation-report-template.md).
 
 Важно:
 
