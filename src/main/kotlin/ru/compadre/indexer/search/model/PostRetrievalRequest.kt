@@ -6,6 +6,7 @@ import ru.compadre.indexer.model.ChunkingStrategy
  * Контекст запуска post-retrieval обработки.
  */
 data class PostRetrievalRequest(
+    val requestId: String? = null,
     val query: String,
     val strategy: ChunkingStrategy?,
     val initialTopK: Int,

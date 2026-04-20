@@ -31,6 +31,7 @@ class RetrievalPipelineService(
      * Выполняет retrieval и возвращает расширенный результат пайплайна.
      */
     suspend fun retrieve(
+        requestId: String? = null,
         query: String,
         databasePath: Path,
         strategy: ChunkingStrategy?,
@@ -53,6 +54,7 @@ class RetrievalPipelineService(
             config = config,
         )
         val request = PostRetrievalRequest(
+            requestId = requestId,
             query = query,
             strategy = strategy,
             initialTopK = initialTopK,

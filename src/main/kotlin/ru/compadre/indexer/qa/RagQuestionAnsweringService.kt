@@ -14,10 +14,18 @@ import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.search.model.SearchMatch
 import ru.compadre.indexer.trace.NoOpTraceSink
 import ru.compadre.indexer.trace.TraceSink
+import ru.compadre.indexer.trace.emitRecord
+import ru.compadre.indexer.trace.jsonArrayOfStrings
+import ru.compadre.indexer.trace.putBoolean
+import ru.compadre.indexer.trace.putDouble
+import ru.compadre.indexer.trace.putInt
+import ru.compadre.indexer.trace.putString
+import ru.compadre.indexer.trace.tracePayload
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.time.Instant
+import java.util.UUID
 
 /**
  * Question-answering service that combines retrieval context with an LLM response.
@@ -39,7 +47,22 @@ class RagQuestionAnsweringService(
         finalTopK: Int,
         config: AppConfig,
     ): RagAnswer {
+        val requestId = "rag-${UUID.randomUUID()}"
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "rag_request_started",
+            stage = "rag.answer",
+            payload = tracePayload {
+                putString("question", question)
+                putString("databasePath", databasePath.toAbsolutePath().toString())
+                putString("strategy", strategy.id)
+                putInt("initialTopK", initialTopK)
+                putInt("finalTopK", finalTopK)
+                putString("postProcessingMode", config.search.postProcessingMode)
+            },
+        )
         val retrievalResult = retrievalPipelineService.retrieve(
+            requestId = requestId,
             query = question,
             databasePath = databasePath,
             strategy = strategy,
@@ -49,15 +72,32 @@ class RagQuestionAnsweringService(
         )
         val selectedMatches = retrievalResult.selectedMatches
         val guardDecision = evaluateAnswerGuard(selectedMatches, config.answerGuard)
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "answer_guard_checked",
+            stage = "rag.answer_guard",
+            payload = tracePayload {
+                putBoolean("allowed", guardDecision.allowed)
+                putString("reason", guardDecision.reason)
+                putInt("selectedMatchesCount", selectedMatches.size)
+                putDouble("topScore", selectedMatches.maxOfOrNull(SearchMatch::score))
+                putDouble("minTopScore", config.answerGuard.minTopScore)
+                putInt("minSelectedChunks", config.answerGuard.minSelectedChunks)
+                put("selectedChunkIds", jsonArrayOfStrings(selectedMatches.map { it.embeddedChunk.chunk.metadata.chunkId }))
+            },
+        )
 
         if (!guardDecision.allowed) {
-            return RagAnswer(
+            return buildLoggedAnswer(
+                requestId = requestId,
+                ragAnswer = RagAnswer(
                 answer = REFUSAL_ANSWER,
                 sources = emptyList(),
                 quotes = emptyList(),
                 isRefusal = true,
                 refusalReason = guardDecision.reason,
                 retrievalResult = retrievalResult,
+            ),
             )
         }
 
@@ -74,6 +114,16 @@ class RagQuestionAnsweringService(
                 ),
             ),
         )
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "answer_llm_completed",
+            stage = "rag.answer_llm",
+            payload = tracePayload {
+                putString("question", question)
+                put("selectedChunkIds", jsonArrayOfStrings(selectedMatches.map { it.embeddedChunk.chunk.metadata.chunkId }))
+                putString("rawCompletion", completion)
+            },
+        )
         val parsedCompletion = parseModelCompletion(completion)
 
         if (parsedCompletion == null) {
@@ -84,25 +134,31 @@ class RagQuestionAnsweringService(
                 selectedMatches = selectedMatches,
                 failureKind = "invalid_json_or_missing_required_fields",
             )
-            return RagAnswer(
+            return buildLoggedAnswer(
+                requestId = requestId,
+                ragAnswer = RagAnswer(
                 answer = parseFailureAnswer(),
                 sources = buildSources(selectedMatches),
                 quotes = emptyList(),
                 isRefusal = true,
                 refusalReason = "llm_response_invalid_json_or_missing_required_fields",
                 retrievalResult = retrievalResult,
+            ),
             )
         }
 
         if (parsedCompletion.quotes.isEmpty()) {
             if (looksLikeRefusal(parsedCompletion.answer)) {
-                return RagAnswer(
+                return buildLoggedAnswer(
+                    requestId = requestId,
+                    ragAnswer = RagAnswer(
                     answer = parsedCompletion.answer,
                     sources = emptyList(),
                     quotes = emptyList(),
                     isRefusal = true,
                     refusalReason = "llm_refusal_due_to_missing_grounding_quote",
                     retrievalResult = retrievalResult,
+                ),
                 )
             }
 
@@ -113,21 +169,49 @@ class RagQuestionAnsweringService(
                 selectedMatches = selectedMatches,
                 failureKind = "missing_quotes",
             )
-            return RagAnswer(
+            return buildLoggedAnswer(
+                requestId = requestId,
+                ragAnswer = RagAnswer(
                 answer = MISSING_QUOTES_ANSWER,
                 sources = buildSources(selectedMatches),
                 quotes = emptyList(),
                 warningMessage = MISSING_QUOTES_WARNING,
                 retrievalResult = retrievalResult,
+            ),
             )
         }
 
-        return RagAnswer(
+        return buildLoggedAnswer(
+            requestId = requestId,
+            ragAnswer = RagAnswer(
             answer = parsedCompletion.answer,
             sources = buildSources(selectedMatches),
             quotes = parsedCompletion.quotes,
             retrievalResult = retrievalResult,
+        ),
         )
+    }
+
+    private fun buildLoggedAnswer(
+        requestId: String,
+        ragAnswer: RagAnswer,
+    ): RagAnswer {
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "rag_answer_built",
+            stage = "rag.answer_result",
+            payload = tracePayload {
+                putString("answer", ragAnswer.answer)
+                putInt("sourcesCount", ragAnswer.sources.size)
+                putInt("quotesCount", ragAnswer.quotes.size)
+                putString("warningMessage", ragAnswer.warningMessage)
+                putBoolean("isRefusal", ragAnswer.isRefusal)
+                putString("refusalReason", ragAnswer.refusalReason)
+                put("sourceChunkIds", jsonArrayOfStrings(ragAnswer.sources.map(RagSource::chunkId)))
+                put("quoteChunkIds", jsonArrayOfStrings(ragAnswer.quotes.map(RagQuote::chunkId)))
+            },
+        )
+        return ragAnswer
     }
 
     private fun evaluateAnswerGuard(
