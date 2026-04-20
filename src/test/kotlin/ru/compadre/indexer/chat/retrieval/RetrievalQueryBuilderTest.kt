@@ -44,17 +44,16 @@ class RetrievalQueryBuilderTest {
                         definition = "рабочая память задачи",
                     ),
                 ),
-                lastUserIntent = "Продолжить проектирование chat-слоя",
+                lastUserIntent = "Найти способ хранения истории диалога для mini-chat с RAG",
             ),
         )
 
         assertEquals(RetrievalAction.PERFORMED, result.action)
         assertEquals(null, result.skipReason)
-        assertTrue(result.query!!.contains("Как хранить историю диалога?"))
-        assertTrue(result.query.contains("Сделать mini-chat с RAG"))
-        assertTrue(result.query.contains("CLI-only"))
-        assertTrue(result.query.contains("task state: рабочая память задачи"))
-        assertTrue(result.query.contains("Продолжить проектирование chat-слоя"))
+        assertTrue(result.query!!.contains("Найти способ хранения истории диалога для mini-chat с RAG"))
+        assertTrue(!result.query.contains("Сделать mini-chat с RAG"))
+        assertTrue(!result.query.contains("CLI-only"))
+        assertTrue(!result.query.contains("task state: рабочая память задачи"))
     }
 
     @Test
@@ -79,7 +78,7 @@ class RetrievalQueryBuilderTest {
             userMessage = "Коротко, в 2-3 предложениях.",
             taskState = TaskState(
                 constraints = listOf("Обсуждать только текст «Реформа»"),
-                lastUserIntent = "Спросить о том, как в тексте показана сама Реформа",
+                lastUserIntent = "Найти в тексте «Реформа» описание образа богини Реформы",
             ),
             recentHistory = listOf(
                 ChatMessageRecord(
@@ -92,12 +91,29 @@ class RetrievalQueryBuilderTest {
         )
 
         assertEquals(RetrievalAction.PERFORMED, result.action)
-        assertTrue(result.query!!.contains("Документ:"))
+        assertTrue(result.query!!.contains("Текст «Реформа»."))
         assertTrue(result.query.contains("Реформа"))
-        assertTrue(result.query.contains("Спросить о том, как в тексте показана сама Реформа"))
-        assertTrue(result.query.contains("Дополнительные требования к ответу:"))
+        assertTrue(result.query.contains("Найти в тексте «Реформа» описание образа богини Реформы"))
+        assertTrue(result.query.contains("Формат ответа:"))
         assertTrue(result.query.contains("Коротко, в 2-3 предложениях."))
-        assertTrue(result.query.contains("Предыдущий пользовательский вопрос:"))
+        assertTrue(!result.query.contains("Предыдущий пользовательский вопрос:"))
+    }
+
+    @Test
+    fun `build uses retrieval-ready intent as semantic core for follow-up question`() {
+        val result = builder.build(
+            userMessage = "Что ещё в этом тексте связано с её происхождением?",
+            taskState = TaskState(
+                constraints = listOf("Обсуждать только текст «Реформа»"),
+                lastUserIntent = "Найти в тексте «Реформа» дополнительные детали происхождения богини Реформы",
+            ),
+        )
+
+        assertEquals(RetrievalAction.PERFORMED, result.action)
+        assertTrue(result.query!!.contains("Текст «Реформа»."))
+        assertTrue(result.query.contains("дополнительные детали происхождения богини Реформы"))
+        assertTrue(!result.query.contains("Текущее намерение:"))
+        assertTrue(!result.query.contains("Ограничения:"))
     }
 
     @Test

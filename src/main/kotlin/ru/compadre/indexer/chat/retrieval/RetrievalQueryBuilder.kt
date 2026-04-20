@@ -41,56 +41,29 @@ class RetrievalQueryBuilder {
         val referencedDocument = referencedDocumentTitle(normalizedMessage, taskState)
         val previousUserQuestion = previousUserQuestion(recentHistory)
         val effectiveIntent = effectiveIntent(normalizedMessage, taskState, previousUserQuestion)
-        val includePreviousQuestion = shouldIncludePreviousQuestion(normalizedMessage, previousUserQuestion)
+        val answerStyleRequirements = answerStyleRequirements(normalizedMessage, effectiveIntent)
+        val relevantFixedTerms = relevantFixedTerms(taskState, effectiveIntent)
 
         val query = buildString {
             referencedDocument?.let { documentTitle ->
-                appendLine("Документ:")
-                appendLine(documentTitle)
-                appendLine()
+                append("Текст «")
+                append(documentTitle)
+                appendLine("».")
             }
 
-            appendLine("Текущий вопрос:")
             appendLine(effectiveIntent)
 
-            if (isAnswerStyleModifierTurn(normalizedMessage) && normalizedMessage != effectiveIntent) {
+            if (answerStyleRequirements != null) {
                 appendLine()
-                appendLine("Дополнительные требования к ответу:")
-                appendLine(normalizedMessage)
+                appendLine(answerStyleRequirements)
             }
 
-            if (includePreviousQuestion && previousUserQuestion != null) {
-                appendLine()
-                appendLine("Предыдущий пользовательский вопрос:")
-                appendLine(previousUserQuestion)
-            }
-
-            taskState.goal?.let { goal ->
-                appendLine()
-                appendLine("Цель диалога:")
-                appendLine(goal)
-            }
-
-            if (taskState.constraints.isNotEmpty()) {
-                appendLine()
-                appendLine("Ограничения:")
-                taskState.constraints.forEach { constraint ->
-                    appendLine("- $constraint")
-                }
-            }
-
-            if (taskState.fixedTerms.isNotEmpty()) {
+            if (relevantFixedTerms.isNotEmpty()) {
                 appendLine()
                 appendLine("Термины:")
-                taskState.fixedTerms.forEach { term ->
+                relevantFixedTerms.forEach { term ->
                     appendLine("- ${term.term}: ${term.definition}")
                 }
-            }
-
-            taskState.lastUserIntent?.let { lastUserIntent ->
-                appendLine()
-                appendLine("Текущее намерение:")
-                appendLine(lastUserIntent)
             }
         }.trim()
 
@@ -106,9 +79,9 @@ class RetrievalQueryBuilder {
         previousUserQuestion: String?,
     ): String =
         if (isAnswerStyleModifierTurn(userMessage)) {
-            previousUserQuestion ?: taskState.lastUserIntent ?: userMessage
+            taskState.lastUserIntent ?: previousUserQuestion ?: userMessage
         } else {
-            userMessage
+            taskState.lastUserIntent ?: userMessage
         }
 
     private fun isShortServiceTurn(userMessage: String): Boolean {
@@ -139,16 +112,22 @@ class RetrievalQueryBuilder {
             ?.text
             ?.trim()
 
-    private fun shouldIncludePreviousQuestion(
+    private fun answerStyleRequirements(
         userMessage: String,
-        previousUserQuestion: String?,
-    ): Boolean {
-        if (previousUserQuestion == null) {
-            return false
+        effectiveIntent: String,
+    ): String? =
+        if (isAnswerStyleModifierTurn(userMessage) && userMessage != effectiveIntent) {
+            "Формат ответа: $userMessage"
+        } else {
+            null
         }
 
-        val normalized = userMessage.lowercase()
-        return FOLLOW_UP_MARKERS.any(normalized::contains) || isAnswerStyleModifierTurn(normalized)
+    private fun relevantFixedTerms(
+        taskState: TaskState,
+        effectiveIntent: String,
+    ) = taskState.fixedTerms.filter { term ->
+        effectiveIntent.contains(term.term, ignoreCase = true) ||
+            effectiveIntent.contains(term.definition, ignoreCase = true)
     }
 
     private fun referencedDocumentTitle(
@@ -196,17 +175,6 @@ class RetrievalQueryBuilder {
             "в двух-трех предложениях",
             "по пунктам",
             "подробно",
-        )
-        private val FOLLOW_UP_MARKERS = listOf(
-            "а как",
-            "а что",
-            "что ещё",
-            "о ней",
-            "об этом",
-            "по текущему",
-            "по этому",
-            "тогда",
-            "там",
         )
         private val DOCUMENT_TITLE_REGEX = Regex("""текст\s+[«"]([^»"]+)[»"]""", RegexOption.IGNORE_CASE)
     }
