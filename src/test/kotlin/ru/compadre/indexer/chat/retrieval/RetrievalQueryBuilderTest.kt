@@ -2,9 +2,12 @@ package ru.compadre.indexer.chat.retrieval
 
 import ru.compadre.indexer.chat.model.FixedTerm
 import ru.compadre.indexer.chat.model.TaskState
+import ru.compadre.indexer.chat.model.ChatMessageRecord
+import ru.compadre.indexer.chat.model.ChatRole
 import ru.compadre.indexer.chat.retrieval.model.RetrievalAction
 import ru.compadre.indexer.chat.retrieval.model.RetrievalQueryBuildResult
 import ru.compadre.indexer.chat.retrieval.model.RetrievalSkipReason
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -52,6 +55,49 @@ class RetrievalQueryBuilderTest {
         assertTrue(result.query.contains("CLI-only"))
         assertTrue(result.query.contains("task state: рабочая память задачи"))
         assertTrue(result.query.contains("Продолжить проектирование chat-слоя"))
+    }
+
+    @Test
+    fun `build skips retrieval for task-state only turn`() {
+        val result = builder.build(
+            userMessage = "Будем обсуждать только текст «Реформа». Отвечай только по нему.",
+            taskState = TaskState(),
+        )
+
+        assertEquals(
+            RetrievalQueryBuildResult(
+                action = RetrievalAction.SKIPPED,
+                skipReason = RetrievalSkipReason.TASK_STATE_UPDATE_ONLY,
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun `build reuses last intent for answer style modifier`() {
+        val result = builder.build(
+            userMessage = "Коротко, в 2-3 предложениях.",
+            taskState = TaskState(
+                constraints = listOf("Обсуждать только текст «Реформа»"),
+                lastUserIntent = "Спросить о том, как в тексте показана сама Реформа",
+            ),
+            recentHistory = listOf(
+                ChatMessageRecord(
+                    turnId = 1,
+                    role = ChatRole.USER,
+                    text = "А как там показана сама Реформа?",
+                    timestamp = Instant.parse("2026-04-20T10:00:00Z"),
+                ),
+            ),
+        )
+
+        assertEquals(RetrievalAction.PERFORMED, result.action)
+        assertTrue(result.query!!.contains("Документ:"))
+        assertTrue(result.query.contains("Реформа"))
+        assertTrue(result.query.contains("Спросить о том, как в тексте показана сама Реформа"))
+        assertTrue(result.query.contains("Дополнительные требования к ответу:"))
+        assertTrue(result.query.contains("Коротко, в 2-3 предложениях."))
+        assertTrue(result.query.contains("Предыдущий пользовательский вопрос:"))
     }
 
     @Test

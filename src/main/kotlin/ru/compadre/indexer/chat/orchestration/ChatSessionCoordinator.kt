@@ -99,6 +99,7 @@ class ChatSessionCoordinator(
         val retrievalQuery = retrievalQueryBuilder.build(
             userMessage = userMessage,
             taskState = updatedTaskState,
+            recentHistory = recentHistory,
         )
         traceSink.emitRecord(
             requestId = requestId,
