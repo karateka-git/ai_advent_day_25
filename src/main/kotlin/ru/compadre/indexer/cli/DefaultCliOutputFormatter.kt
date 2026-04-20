@@ -86,18 +86,24 @@ class DefaultCliOutputFormatter : CliOutputFormatter {
                 result.ragAnswer?.let { ragAnswer ->
                     add("Ответ:")
                     add(ragAnswer.answer)
+                    if (ragAnswer.isRefusal) {
+                        add("")
+                        add("Статус: не удалось получить ответ с опорой на контекст.")
+                    }
                     ragAnswer.warningMessage?.let { warning ->
                         add("")
                         add(warning)
                     }
-                    add("")
-                    addAll(sourcesLines(ragAnswer))
+                    if (ragAnswer.sources.isNotEmpty()) {
+                        add("")
+                        addAll(sourcesLines(ragAnswer))
+                    }
                     quotesLines(ragAnswer)?.let { quoteLines ->
                         add("")
                         addAll(quoteLines)
                     }
                 } ?: run {
-                    add("Ответ пока не получен.")
+                    add("Ответ с опорой на контекст пока не получен.")
                 }
             }
         }
