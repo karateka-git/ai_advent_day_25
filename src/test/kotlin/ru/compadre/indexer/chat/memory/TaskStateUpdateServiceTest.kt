@@ -250,6 +250,64 @@ class TaskStateUpdateServiceTest {
         assertEquals("Обсуждать текст «Реформа»", updatedState.goal)
     }
 
+    @Test
+    fun `update clears topic-bound memory on topic switch`() {
+        val service = TaskStateUpdateService(
+            llmClient = FakeChatCompletionClient(
+                """
+                {
+                  "turnType": "topic_switch",
+                  "goal": null,
+                  "constraints": ["Не обсуждать текст «Аден»"],
+                  "fixedTerms": [
+                    { "term": "атмосфера города", "definition": "термин для текста «Аден»" }
+                  ],
+                  "knownFacts": ["В тексте «Аден» много мрачных деталей"],
+                  "openQuestions": ["Как в тексте «Аден» описана атмосфера города?"],
+                  "lastUserIntent": "Переключиться на новый текст"
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = service.updateWithTurnType(
+            requestId = "request-topic-switch",
+            previousTaskState = TaskState(
+                goal = "Обсуждать текст «Аден»",
+                constraints = listOf(
+                    "Обсуждать только текст «Аден»",
+                    "Если данных мало, честно откажись",
+                ),
+                fixedTerms = listOf(
+                    FixedTerm(
+                        term = "атмосфера города",
+                        definition = "цвет, берег и настроение в тексте «Аден»",
+                    ),
+                ),
+                knownFacts = listOf("В тексте «Аден» много мрачных деталей"),
+                openQuestions = listOf("Как в тексте «Аден» описана атмосфера города?"),
+                lastUserIntent = "Спросить про Аден",
+            ),
+            recentHistory = emptyList(),
+            userMessage = "Теперь обсуждаем не «Аден», а только текст «Реформа».",
+            config = testConfig(),
+        )
+
+        assertEquals(ChatTurnType.TOPIC_SWITCH, result.turnType)
+        assertEquals("Обсуждать текст «Реформа»", result.taskState.goal)
+        assertEquals(
+            listOf(
+                "Если данных мало, честно откажись",
+                "Обсуждать только текст «Реформа»",
+            ),
+            result.taskState.constraints,
+        )
+        assertEquals(emptyList(), result.taskState.fixedTerms)
+        assertEquals(emptyList(), result.taskState.knownFacts)
+        assertEquals(emptyList(), result.taskState.openQuestions)
+        assertEquals("Переключиться на новый текст", result.taskState.lastUserIntent)
+    }
+
     private class FakeChatCompletionClient(
         private val completion: String,
     ) : ChatCompletionClient {

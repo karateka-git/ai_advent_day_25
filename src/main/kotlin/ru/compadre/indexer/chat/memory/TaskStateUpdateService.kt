@@ -91,6 +91,7 @@ class TaskStateUpdateService(
         val parsedResult = parseModelCompletion(completion, userMessage)
         val stabilizedTaskState = parsedResult?.taskState
             ?.stabilize(
+                turnType = parsedResult.turnType,
                 previousTaskState = previousTaskState,
                 userMessage = userMessage,
             )
@@ -248,12 +249,60 @@ class TaskStateUpdateService(
             lastUserIntent != null
 
     private fun TaskState.stabilize(
+        turnType: ChatTurnType,
         previousTaskState: TaskState,
         userMessage: String,
     ): TaskState {
+        if (turnType == ChatTurnType.TOPIC_SWITCH) {
+            return stabilizeTopicSwitch(
+                previousTaskState = previousTaskState,
+                userMessage = userMessage,
+            )
+        }
+
         val inferredGoal = inferGoalFromUserMessage(userMessage)
         return copy(
             goal = inferredGoal ?: goal ?: previousTaskState.goal,
+        )
+    }
+
+    private fun TaskState.stabilizeTopicSwitch(
+        previousTaskState: TaskState,
+        userMessage: String,
+    ): TaskState {
+        val newTopic = inferDocumentTitle(userMessage)
+            ?: activeDocumentTitle()
+            ?: previousTaskState.activeDocumentTitle()
+        val previousTopic = previousTaskState.activeDocumentTitle()
+        val preservedGlobalConstraints = previousTaskState.constraints
+            .filter(::isGlobalConstraint)
+        val currentGlobalConstraints = constraints.filter(::isGlobalConstraint)
+        val topicConstraints = constraints.filter { constraint ->
+            newTopic != null && constraint.referencesTopic(newTopic)
+        }
+        val normalizedConstraints = buildList {
+            addAll(preservedGlobalConstraints)
+            addAll(currentGlobalConstraints)
+            addAll(topicConstraints)
+            if (newTopic != null && none { it.referencesTopic(newTopic) }) {
+                add("Обсуждать только текст «$newTopic»")
+            }
+        }.distinct()
+            .take(MAX_CONSTRAINTS)
+        val normalizedFixedTerms = fixedTerms.filter { term ->
+            term.referencesTopic(newTopic)
+        }.take(MAX_FIXED_TERMS)
+        val normalizedGoal = newTopic?.let { "Обсуждать текст «$it»" }
+            ?: goal
+            ?: previousTaskState.goal
+
+        return copy(
+            goal = normalizedGoal,
+            constraints = normalizedConstraints,
+            fixedTerms = normalizedFixedTerms,
+            knownFacts = knownFacts.filter { fact -> fact.referencesTopic(newTopic) }.take(MAX_KNOWN_FACTS),
+            openQuestions = openQuestions.filter { question -> question.referencesTopic(newTopic) }.take(MAX_OPEN_QUESTIONS),
+            lastUserIntent = lastUserIntent,
         )
     }
 
@@ -261,6 +310,28 @@ class TaskStateUpdateService(
         GOAL_TEXT_REGEX.find(userMessage)?.groupValues?.get(1)?.trim()?.takeIf(String::isNotBlank)?.let { title ->
             "Обсуждать текст «$title»"
         }
+
+    private fun TaskState.activeDocumentTitle(): String? =
+        constraints.firstNotNullOfOrNull(::inferDocumentTitle)
+            ?: goal?.let(::inferDocumentTitle)
+            ?: knownFacts.firstNotNullOfOrNull(::inferDocumentTitle)
+
+    private fun inferDocumentTitle(text: String): String? =
+        DOCUMENT_TITLE_REGEX.find(text)?.groupValues?.get(1)?.trim()?.takeIf(String::isNotBlank)
+
+    private fun isGlobalConstraint(constraint: String): Boolean {
+        val normalized = constraint.lowercase()
+        return DOCUMENT_TITLE_REGEX.find(normalized) == null &&
+            !normalized.contains("этот текст") &&
+            !normalized.contains("по нему") &&
+            !normalized.contains("текущий текст")
+    }
+
+    private fun String.referencesTopic(topic: String?): Boolean =
+        topic != null && contains(topic, ignoreCase = true)
+
+    private fun FixedTerm.referencesTopic(topic: String?): Boolean =
+        term.referencesTopic(topic) || definition.referencesTopic(topic)
 
     private fun List<String>.normalizeValues(limit: Int): List<String> =
         mapNotNull { value -> value.normalizeSingleValue() }
@@ -297,6 +368,7 @@ class TaskStateUpdateService(
         )
         private val GOAL_TEXT_REGEX =
             Regex("""(?:обсуждать|обсуждаем)\s+(?:не\s+)?(?:только\s+)?текст\s+[«"]([^»"]+)[»"]""", RegexOption.IGNORE_CASE)
+        private val DOCUMENT_TITLE_REGEX = Regex("""текст\s+[«"]([^»"]+)[»"]""", RegexOption.IGNORE_CASE)
         private val SYSTEM_PROMPT = """
             Ты обновляешь компактную память задачи для chat-сессии.
             Верни ровно один JSON-объект и ничего больше.
