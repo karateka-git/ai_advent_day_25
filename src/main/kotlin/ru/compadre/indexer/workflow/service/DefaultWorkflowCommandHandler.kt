@@ -9,16 +9,20 @@ import ru.compadre.indexer.model.ChunkingStrategy
 import ru.compadre.indexer.model.DocumentChunk
 import ru.compadre.indexer.model.EmbeddedChunk
 import ru.compadre.indexer.model.RawDocument
-import ru.compadre.indexer.report.ChunkingComparisonService
-import ru.compadre.indexer.report.MarkdownComparisonReportWriter
 import ru.compadre.indexer.qa.PlainQuestionAnsweringService
 import ru.compadre.indexer.qa.RagQuestionAnsweringService
+import ru.compadre.indexer.report.ChunkingComparisonService
+import ru.compadre.indexer.report.MarkdownComparisonReportWriter
 import ru.compadre.indexer.search.BruteForceSearchEngine
 import ru.compadre.indexer.search.RetrievalPipelineService
 import ru.compadre.indexer.storage.IndexStore
 import ru.compadre.indexer.storage.SqliteIndexStore
 import ru.compadre.indexer.trace.NoOpTraceSink
 import ru.compadre.indexer.trace.TraceSink
+import ru.compadre.indexer.trace.emitRecord
+import ru.compadre.indexer.trace.putInt
+import ru.compadre.indexer.trace.putString
+import ru.compadre.indexer.trace.tracePayload
 import ru.compadre.indexer.workflow.command.AskCommand
 import ru.compadre.indexer.workflow.command.CompareCommand
 import ru.compadre.indexer.workflow.command.HelpCommand
@@ -26,19 +30,18 @@ import ru.compadre.indexer.workflow.command.IndexCommand
 import ru.compadre.indexer.workflow.command.SearchCommand
 import ru.compadre.indexer.workflow.command.SetPostModeCommand
 import ru.compadre.indexer.workflow.command.WorkflowCommand
+import ru.compadre.indexer.workflow.result.AskResult
 import ru.compadre.indexer.workflow.result.ChunkEmbeddingPreview
-import ru.compadre.indexer.workflow.result.ChunkPreviewResult
-import ru.compadre.indexer.workflow.result.CompareReportResult
 import ru.compadre.indexer.workflow.result.CommandResult
+import ru.compadre.indexer.workflow.result.CompareReportResult
 import ru.compadre.indexer.workflow.result.HelpResult
 import ru.compadre.indexer.workflow.result.IndexPersistResult
-import ru.compadre.indexer.workflow.result.AskResult
 import ru.compadre.indexer.workflow.result.SearchResult
 import java.nio.file.Path
 import java.util.UUID
 
 /**
- * Стартовая реализация обработчика команд для этапов загрузки корпуса, chunking, embeddings и SQLite storage.
+ * Starting workflow handler for indexing, chunking, embeddings and retrieval commands.
  */
 class DefaultWorkflowCommandHandler(
     private val traceSink: TraceSink = NoOpTraceSink,
@@ -57,42 +60,62 @@ class DefaultWorkflowCommandHandler(
         traceSink = traceSink,
     ),
 ) : WorkflowCommandHandler {
-    override suspend fun handle(command: WorkflowCommand, config: AppConfig): CommandResult = when (command) {
-        HelpCommand -> HelpResult(
-            inputDir = config.app.inputDir,
-            outputDir = config.app.outputDir,
-            ollamaBaseUrl = config.ollama.baseUrl,
-            embeddingModel = config.ollama.embeddingModel,
-            fixedSize = config.chunking.fixedSize,
-            overlap = config.chunking.overlap,
-            postProcessingMode = config.search.postProcessingMode,
+    override suspend fun handle(command: WorkflowCommand, config: AppConfig): CommandResult {
+        val requestId = newRequestId(commandTracePrefix(command))
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "command_started",
+            stage = "workflow.command",
+            payload = buildCommandStartedPayload(command, config),
         )
 
-        is AskCommand -> runAsk(command, config)
+        val result = when (command) {
+            HelpCommand -> HelpResult(
+                inputDir = config.app.inputDir,
+                outputDir = config.app.outputDir,
+                ollamaBaseUrl = config.ollama.baseUrl,
+                embeddingModel = config.ollama.embeddingModel,
+                fixedSize = config.chunking.fixedSize,
+                overlap = config.chunking.overlap,
+                postProcessingMode = config.search.postProcessingMode,
+            )
 
-        is SearchCommand -> runSearch(
-            query = command.query,
-            strategy = command.strategy,
-            topK = command.topK,
-            showAllCandidates = command.showAllCandidates,
-            config = config,
+            is AskCommand -> runAsk(command, config, requestId)
+
+            is SearchCommand -> runSearch(
+                requestId = requestId,
+                query = command.query,
+                strategy = command.strategy,
+                topK = command.topK,
+                showAllCandidates = command.showAllCandidates,
+                config = config,
+            )
+
+            is IndexCommand -> runIndexing(
+                inputDir = command.inputDir ?: config.app.inputDir,
+                config = config,
+                strategy = command.strategy,
+                allStrategies = command.allStrategies,
+            )
+
+            is CompareCommand -> buildCompareReport(
+                inputDir = command.inputDir ?: config.app.inputDir,
+                config = config,
+            )
+
+            is SetPostModeCommand -> throw IllegalArgumentException(
+                "Команда `set` должна обрабатываться на уровне CLI-сессии, а не workflow handler.",
+            )
+        }
+
+        traceSink.emitRecord(
+            requestId = requestId,
+            kind = "command_completed",
+            stage = "workflow.command",
+            payload = buildCommandCompletedPayload(command, result),
         )
 
-        is IndexCommand -> runIndexing(
-            inputDir = command.inputDir ?: config.app.inputDir,
-            config = config,
-            strategy = command.strategy,
-            allStrategies = command.allStrategies,
-        )
-
-        is CompareCommand -> buildCompareReport(
-            inputDir = command.inputDir ?: config.app.inputDir,
-            config = config,
-        )
-
-        is SetPostModeCommand -> throw IllegalArgumentException(
-            "Команда `set` должна обрабатываться на уровне CLI-сессии, а не workflow handler.",
-        )
+        return result
     }
 
     private suspend fun runIndexing(
@@ -247,6 +270,7 @@ class DefaultWorkflowCommandHandler(
     private suspend fun runAsk(
         command: AskCommand,
         config: AppConfig,
+        requestId: String,
     ): AskResult =
         when (command.mode.lowercase()) {
             "plain" -> AskResult(
@@ -259,7 +283,6 @@ class DefaultWorkflowCommandHandler(
             )
 
             "rag" -> {
-                val requestId = newRequestId("ask-rag")
                 val strategy = command.strategy ?: ChunkingStrategy.FIXED
                 val finalTopK = command.topK ?: config.search.finalTopK
                 val initialTopK = maxOf(config.search.initialTopK, finalTopK)
@@ -298,13 +321,13 @@ class DefaultWorkflowCommandHandler(
         }
 
     private suspend fun runSearch(
+        requestId: String,
         query: String,
         strategy: ChunkingStrategy?,
         topK: Int?,
         showAllCandidates: Boolean,
         config: AppConfig,
     ): SearchResult {
-        val requestId = newRequestId("search")
         val effectiveStrategy = strategy ?: ChunkingStrategy.FIXED
         val finalTopK = topK ?: config.search.finalTopK
         val initialTopK = maxOf(config.search.initialTopK, finalTopK)
@@ -348,9 +371,61 @@ class DefaultWorkflowCommandHandler(
         return Path.of(outputDir).resolve(fileName)
     }
 
+    private fun newRequestId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
+
+    private fun commandTracePrefix(command: WorkflowCommand): String =
+        when (command) {
+            is AskCommand -> "ask"
+            is SearchCommand -> "search"
+            is IndexCommand -> "index"
+            is CompareCommand -> "compare"
+            HelpCommand -> "help"
+            is SetPostModeCommand -> "set"
+        }
+
+    private fun buildCommandStartedPayload(
+        command: WorkflowCommand,
+        config: AppConfig,
+    ) = tracePayload {
+        putString("commandType", commandTracePrefix(command))
+        when (command) {
+            is AskCommand -> {
+                putString("query", command.query)
+                putString("mode", command.mode)
+                putString("strategy", command.strategy?.id)
+                putInt("topK", command.topK)
+                putString("postMode", command.postMode ?: config.search.postProcessingMode)
+            }
+
+            is SearchCommand -> {
+                putString("query", command.query)
+                putString("strategy", command.strategy?.id)
+                putInt("topK", command.topK)
+                putString("postMode", command.postMode ?: config.search.postProcessingMode)
+            }
+
+            is IndexCommand -> {
+                putString("inputDir", command.inputDir ?: config.app.inputDir)
+                putString("strategy", command.strategy?.id)
+                putString("allStrategies", command.allStrategies.toString())
+            }
+
+            is CompareCommand -> putString("inputDir", command.inputDir ?: config.app.inputDir)
+            HelpCommand -> putString("postMode", config.search.postProcessingMode)
+            is SetPostModeCommand -> putString("postMode", command.postMode)
+        }
+    }
+
+    private fun buildCommandCompletedPayload(
+        command: WorkflowCommand,
+        result: CommandResult,
+    ) = tracePayload {
+        putString("commandType", commandTracePrefix(command))
+        putString("resultKind", result::class.simpleName ?: "CommandResult")
+        putString("status", "success")
+    }
+
     private companion object {
         private const val EMBEDDING_PREVIEW_LIMIT = 3
     }
-
-    private fun newRequestId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
 }
